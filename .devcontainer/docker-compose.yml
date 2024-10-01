@@ -1,0 +1,21 @@
+version: '3'
+services:
+  mpc-rs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DISPLAY
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      # Working
+      - ..:/workspaces/mpc-rs:cached
+      # GUI
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # device access
+      - /dev:/dev
+    working_dir: /workspaces/mpc-rs
+    tty: true
+    command: sleep inf
+    # device access
+    privileged: true

@@ -1,0 +1,17 @@
+{
+	"name": "mpc-rs",
+	"dockerComposeFile": [
+		"docker-compose.yml"
+	],
+	"service": "mpc-rs",
+	"workspaceFolder": "/workspaces/mpc-rs",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"rust-lang.rust-analyzer",
+				"tamasfe.even-better-toml",
+				"serayuzgur.crates"
+			]
+		}
+	}
+}
