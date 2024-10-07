@@ -3,6 +3,7 @@ use rand::prelude::*;
 use rayon::prelude::*;
 
 // ref: https://zenn.dev/takuya_fukatsu/articles/36c0d6911d18b7
+// cargo run --example mppi2 --release
 
 // 予測ホライゾン
 const T: f32 = 2.0;
@@ -10,7 +11,7 @@ const N: usize = 40;
 const DT: f32 = T / N as f32;
 
 // 制御ホライゾン
-const K: usize = 600;
+const K: usize = 8000;
 const LAMBDA: f32 = 2.5;
 const R: f32 = 1.0;
 
@@ -35,15 +36,6 @@ fn main() {
     // 5s までシミュレーション
     let mut t = 0.0;
     while t < 5.0 {
-        // let v_k_n: [na::SVector<f32, N>; K] = core::array::from_fn(|_| {
-        //     na::SVector::<f32, N>::from_distribution(&dist, &mut rng).map(|e| e.clamp(LIMIT.0, LIMIT.1))
-        // });
-        // let v_k_n: Vec<na::SVector<f32, N>> = (0..K)
-        //     .map(|_| {
-        //         na::SVector::<f32, N>::from_distribution(&dist, &mut rng)
-        //             .map(|e| e.clamp(LIMIT.0, LIMIT.1))
-        //     })
-        //     .collect();
         let v_k_n: Vec<na::SVector<f32, N>> = (0..K)
             .map(|_| {
                 na::SVector::<f32, N>::from_fn(|_, _| dist.sample(&mut rng).clamp(LIMIT.0, LIMIT.1))
@@ -58,8 +50,7 @@ fn main() {
                 // 状態の更新
                 let x_n = dynamics(&x_c, *v);
                 // コストの累積
-                (c + x_n[0].powi(2), x_n)
-                // (c + x_n[0].powi(2) + x_n[1].powi(2), x_n)
+                (c + x_n[0].powi(2) + x_n[1].powi(2), x_n)
             });
             *c_i = cost;
         });
