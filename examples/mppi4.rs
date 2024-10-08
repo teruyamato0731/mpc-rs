@@ -6,12 +6,12 @@ use rayon::prelude::*;
 // cargo run --example mppi4 --release
 
 // 予測ホライゾン
-const T: f64 = 1.0;
-const N: usize = 10;
+const T: f64 = 2.0;
+const N: usize = 20;
 const DT: f64 = T / N as f64;
 
 // 制御ホライゾン
-const K: usize = 20000;
+const K: usize = 1e5 as usize;
 const LAMBDA: f64 = 2.5;
 const R: f64 = 1.0;
 
@@ -38,7 +38,7 @@ fn dynamics(state: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
 }
 
 fn cost(x: &na::Vector4<f64>) -> f64 {
-    10.0 * x[0].powi(2) + 20.0 * x[1].powi(2) + 100.0 * x[2].powi(2) + 10.0 * x[3].powi(2)
+    20.0 * x[0].powi(2) + 20.0 * x[1].powi(2) + 100.0 * x[2].powi(2) + 10.0 * x[3].powi(2)
 }
 
 fn main() {
@@ -58,7 +58,7 @@ fn main() {
             .collect();
 
         // 並列処理で予測とコスト計算を行う
-        let mut c_k = [0.0; K];
+        let mut c_k = vec![0.0; K];
         c_k.par_iter_mut().enumerate().for_each(|(i, c_i)| {
             // コストの計算
             let (cost, _) = v_k_n[i].iter().fold((0.0, x), |(c, x_c), v| {
@@ -73,7 +73,7 @@ fn main() {
         // println!("c_k: {:?}", c_k);
 
         // 重みの計算
-        let mut w_k = [0.0; K];
+        let mut w_k = vec![0.0; K];
         w_k.par_iter_mut().enumerate().for_each(|(i, w_i)| {
             let cost_term = c_k[i] / LAMBDA;
             let control_term = u_n
