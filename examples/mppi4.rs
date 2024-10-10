@@ -55,62 +55,13 @@ fn main() {
     // 5s までシミュレーション
     let mut t = 0.0;
     while t < 50.0 {
-        let v_k_n: Vec<na::SVector<f64, N>> = (0..K)
-            .map(|_| {
-                na::SVector::<f64, N>::from_fn(|_, _| dist.sample(&mut rng).clamp(LIMIT.0, LIMIT.1))
-            })
-            .collect();
-
-        // 並列処理で予測とコスト計算を行う
-        let mut c_k = vec![0.0; K];
-        c_k.par_iter_mut().enumerate().for_each(|(i, c_i)| {
-            // コストの計算
-            let (cost, _) = v_k_n[i].iter().fold((0.0, x), |(c, x_c), v| {
-                // 状態の更新
-                let x_n = dynamics(&x_c, *v);
-                // コストの累積
-                (c + cost(&x_n), x_n)
-            });
-            *c_i = cost;
-        });
-
-        // 重みの計算
-        let mut w_k = vec![0.0; K];
-        w_k.par_iter_mut().enumerate().for_each(|(i, w_i)| {
-            let cost_term = c_k[i] / LAMBDA;
-            let control_term = u_n
-                .iter()
-                .zip(v_k_n[i].iter())
-                .fold(0.0, |acc, (u, v)| acc + u / R * v);
-            *w_i = (-cost_term - control_term).exp();
-        });
-        // 正規化
-        let sum: f64 = w_k.iter().sum();
-        if sum == 0.0 {
-            println!("sum is zero");
-            // println!("w_k: {:?}", w_k);
-            break;
-        }
-        w_k.iter_mut().for_each(|w| *w /= sum);
-
-        // 重み付け平均
-        u_n = w_k
-            .par_iter()
-            .enumerate()
-            .map(|(i, w)| *w * v_k_n[i])
-            .reduce(na::SVector::<f64, N>::zeros, |acc, x| acc + x);
-
+        u_n = mppi(&x, &u_n, &mut rng, &dist).unwrap();
         x = dynamics(&x, u_n[0]);
 
         println!(
             "t: {:.2}, u: {:6.2}, x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}]",
             t, u_n[0], x[0], x[1], x[2], x[3]
         );
-
-        // u が 不正値の場合は終了
-        if u_n[0].is_nan() || u_n[0].is_infinite() {
-            break;
-        }
 
         // x[2] が 60度 以上になったら終了
         if x[2].abs() > 60.0f64.to_radians() {
@@ -120,4 +71,62 @@ fn main() {
 
         t += DT;
     }
+}
+
+// MPPIの実装
+fn mppi(
+    x: &na::Vector4<f64>,
+    u_n: &na::SVector<f64, N>,
+    mut rng: &mut ThreadRng,
+    dist: &rand_distr::Normal<f64>,
+) -> Result<na::SVector<f64, N>, &'static str> {
+    let v_k_n: Vec<na::SVector<f64, N>> = (0..K)
+        .map(|_| {
+            na::SVector::<f64, N>::from_fn(|_, _| dist.sample(&mut rng).clamp(LIMIT.0, LIMIT.1))
+        })
+        .collect();
+
+    // 並列処理で予測とコスト計算を行う
+    let mut c_k = vec![0.0; K];
+    c_k.par_iter_mut().enumerate().for_each(|(i, c_i)| {
+        // コストの計算
+        let (cost, _) = v_k_n[i].iter().fold((0.0, *x), |(c, x_c), v| {
+            // 状態の更新
+            let x_n = dynamics(&x_c, *v);
+            // コストの累積
+            (c + cost(&x_n), x_n)
+        });
+        *c_i = cost;
+    });
+
+    // 重みの計算
+    let mut w_k = vec![0.0; K];
+    w_k.par_iter_mut().enumerate().for_each(|(i, w_i)| {
+        let cost_term = c_k[i] / LAMBDA;
+        let control_term = u_n
+            .iter()
+            .zip(v_k_n[i].iter())
+            .fold(0.0, |acc, (u, v)| acc + u / R * v);
+        *w_i = (-cost_term - control_term).exp();
+    });
+    // 正規化
+    let sum: f64 = w_k.iter().sum();
+    if sum == 0.0 {
+        return Err("sum is zero");
+    }
+    w_k.iter_mut().for_each(|w| *w /= sum);
+
+    // 重み付け平均
+    let u_n = w_k
+        .par_iter()
+        .enumerate()
+        .map(|(i, w)| *w * v_k_n[i])
+        .reduce(na::SVector::<f64, N>::zeros, |acc, x| acc + x);
+
+    // u が 不正値の場合は終了
+    if u_n[0].is_nan() || u_n[0].is_infinite() {
+        return Err("u is invalid");
+    }
+
+    Ok(u_n)
 }
