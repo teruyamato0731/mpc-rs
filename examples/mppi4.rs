@@ -50,9 +50,13 @@ fn main() {
 
     let mut mppi = Mppi::<N, K>::new(dynamics, cost, LAMBDA, R, LIMIT);
 
-    // 5s までシミュレーション
+    // ログファイルの作成
+    let file_path = "logs/mppi.csv";
+    let mut wtr = csv::Writer::from_path(file_path).expect("file open error");
+
+    let now = std::time::Instant::now();
     let mut t = 0.0;
-    while t < 50.0 {
+    while t < 10.0 {
         u_n = mppi.compute(&x, &u_n).unwrap();
         x = dynamics(&x, u_n[0]);
 
@@ -67,6 +71,18 @@ fn main() {
             break;
         }
 
+        wtr.write_record(&[
+            t.to_string(),
+            u_n[0].to_string(),
+            x[0].to_string(),
+            x[1].to_string(),
+            x[2].to_string(),
+            x[3].to_string(),
+        ])
+        .expect("write error");
+        wtr.flush().expect("flush error");
+
         t += DT;
     }
+    println!("elapsed: {:.2} sec", now.elapsed().as_secs_f64());
 }
