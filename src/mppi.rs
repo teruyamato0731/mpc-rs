@@ -42,7 +42,7 @@ impl<const N: usize, const K: usize> Mppi<N, K> {
     ) -> Result<na::SVector<f64, N>, &'static str> {
         let v_k_n: Vec<na::SVector<f64, N>> = (0..K)
             .map(|_| {
-                na::SVector::<f64, N>::from_fn(|_, _| {
+                u_n + na::SVector::<f64, N>::from_fn(|_, _| {
                     self.dist
                         .sample(&mut self.rng)
                         .clamp(self.limit.0, self.limit.1)
