@@ -21,8 +21,8 @@ const Q: na::Matrix4<f64> = matrix![
     0.0, 0.0, 0.5, 1.0;
 ];
 const R: na::Matrix2<f64> = matrix![
-    0.5, 0.5;
-    0.5, 0.5;
+    0.5, 0.0;
+    0.0, 0.5;
 ];
 
 // LAMBDA = α^2 * (n + κ) - n
