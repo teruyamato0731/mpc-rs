@@ -6,14 +6,14 @@ use rayon::prelude::*;
 // cargo run --example mppi4 --release
 
 // 予測ホライゾン
-const T: f64 = 2.0;
-const N: usize = 20;
+const T: f64 = 0.8;
+const N: usize = 8;
 const DT: f64 = T / N as f64;
 
 // 制御ホライゾン
-const K: usize = 1e5 as usize;
-const LAMBDA: f64 = 2.5;
-const R: f64 = 1.0;
+const K: usize = 1e6 as usize;
+const LAMBDA: f64 = 10.0;
+const R: f64 = 5.0;
 
 // 制約
 const LIMIT: (f64, f64) = (-20.0, 20.0);
@@ -38,11 +38,15 @@ fn dynamics(state: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
 }
 
 fn cost(x: &na::Vector4<f64>) -> f64 {
-    20.0 * x[0].powi(2) + 20.0 * x[1].powi(2) + 100.0 * x[2].powi(2) + 10.0 * x[3].powi(2)
+    let term1 = 5.0 * x[0].clamp(-7.0, 7.0).powi(2);
+    let term2 = 9.0 * (x[1] + x[0].clamp(-4.0, 4.0)).clamp(-5.0, 5.0).powi(2);
+    let term3 = 5.0 * x[2].powi(2);
+    let term4 = 1.0 * x[3].powi(2);
+    term1 + term2 + term3 + term4
 }
 
 fn main() {
-    let mut x = na::Vector4::new(1.0, 0.0, 0.1, 0.0);
+    let mut x = na::Vector4::new(0.5, 0.0, 0.1, 0.0);
     let mut u_n = na::SVector::<f64, N>::zeros();
 
     let mut rng = rand::thread_rng();
@@ -50,7 +54,7 @@ fn main() {
 
     // 5s までシミュレーション
     let mut t = 0.0;
-    while t < 5.0 {
+    while t < 50.0 {
         let v_k_n: Vec<na::SVector<f64, N>> = (0..K)
             .map(|_| {
                 na::SVector::<f64, N>::from_fn(|_, _| dist.sample(&mut rng).clamp(LIMIT.0, LIMIT.1))
@@ -70,8 +74,6 @@ fn main() {
             *c_i = cost;
         });
 
-        // println!("c_k: {:?}", c_k);
-
         // 重みの計算
         let mut w_k = vec![0.0; K];
         w_k.par_iter_mut().enumerate().for_each(|(i, w_i)| {
@@ -84,6 +86,11 @@ fn main() {
         });
         // 正規化
         let sum: f64 = w_k.iter().sum();
+        if sum == 0.0 {
+            println!("sum is zero");
+            // println!("w_k: {:?}", w_k);
+            break;
+        }
         w_k.iter_mut().for_each(|w| *w /= sum);
 
         // 重み付け平均
@@ -96,7 +103,7 @@ fn main() {
         x = dynamics(&x, u_n[0]);
 
         println!(
-            "t: {:.2}, u: {:5.2}, x: [{:.2}, {:.2}, {:.2}, {:.2}]",
+            "t: {:.2}, u: {:6.2}, x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}]",
             t, u_n[0], x[0], x[1], x[2], x[3]
         );
 
@@ -107,6 +114,7 @@ fn main() {
 
         // x[2] が 60度 以上になったら終了
         if x[2].abs() > 60.0f64.to_radians() {
+            println!("x[2] is over 60 degrees");
             break;
         }
 
