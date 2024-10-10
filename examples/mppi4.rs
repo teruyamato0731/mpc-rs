@@ -101,16 +101,20 @@ fn mppi(
 
     // 重みの計算
     let mut w_k = vec![0.0; K];
-    w_k.par_iter_mut().enumerate().for_each(|(i, w_i)| {
-        let cost_term = c_k[i] / LAMBDA;
-        let control_term = u_n
-            .iter()
-            .zip(v_k_n[i].iter())
-            .fold(0.0, |acc, (u, v)| acc + u / R * v);
-        *w_i = (-cost_term - control_term).exp();
-    });
+    let sum = w_k
+        .par_iter_mut()
+        .enumerate()
+        .map(|(i, w_i)| {
+            let cost_term = c_k[i] / LAMBDA;
+            let control_term = u_n
+                .iter()
+                .zip(v_k_n[i].iter())
+                .fold(0.0, |acc, (u, v)| acc + u / R * v);
+            *w_i = (-cost_term - control_term).exp();
+            *w_i
+        })
+        .reduce(|| 0.0, |a, b| a + b);
     // 正規化
-    let sum: f64 = w_k.iter().sum();
     if sum == 0.0 {
         return Err("sum is zero");
     }
