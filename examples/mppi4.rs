@@ -10,37 +10,19 @@ const N: usize = 8;
 const DT: f64 = T / N as f64;
 
 // 制御ホライゾン
-const K: usize = 1e6 as usize;
-const LAMBDA: f64 = 10.0;
-const R: f64 = 5.0;
+const K: usize = 4.19375e5 as usize;
+const LAMBDA: f64 = 0.5;
+const R: f64 = 4.2;
 
 // 制約
 const LIMIT: (f64, f64) = (-20.0, 20.0);
 
-// 系ダイナミクスを記述
-const M1: f64 = 150e-3;
-const R_W: f64 = 50e-3;
-const M2: f64 = 2.3 - 2.0 * M1 + 2.0;
-const L: f64 = 0.2474; // 重心までの距離
-const J1: f64 = M1 * R_W * R_W;
-const J2: f64 = 0.5;
-const G: f64 = 9.81;
-const KT: f64 = 0.15; // m2006
-const D: f64 = (M1 + M2 + J1 / R_W * R_W) * (M2 * L * L + J2) - M2 * M2 * L * L;
-fn dynamics(state: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
-    let mut x = *state;
-    x[3] += ((M1 + M2 + J1 / R_W * R_W) / D * M2 * G * L * x[2] - M2 * L / D / R_W * KT * u) * DT;
-    x[2] += x[3] * DT;
-    x[1] += (-M2 * M2 * G * L * L / D * x[2] + (M2 * L * L + J2) / D / R_W * KT * u) * DT;
-    x[0] += x[1] * DT;
-    x
-}
-
 fn cost(x: &na::Vector4<f64>) -> f64 {
-    let term1 = 5.0 * x[0].clamp(-7.0, 7.0).powi(2);
-    let term2 = 9.0 * (x[1] + x[0].clamp(-4.0, 4.0)).clamp(-5.0, 5.0).powi(2);
-    let term3 = 5.0 * x[2].powi(2);
-    let term4 = 1.0 * x[3].powi(2);
+    let x_clamped = x[0].clamp(-2.0, 2.0);
+    let term1 = 2.0 * x_clamped.powi(2);
+    let term2 = 3.0 * (x[1] + 2.0 * x_clamped).clamp(-5.0, 5.0).powi(2);
+    let term3 = 5.0 * (x[2] + 0.35 * x[0].clamp(-0.75, 0.75)).powi(2);
+    let term4 = 1.2 * x[3].powi(2);
     term1 + term2 + term3 + term4
 }
 
@@ -85,4 +67,23 @@ fn main() {
         t += DT;
     }
     println!("elapsed: {:.2} sec", now.elapsed().as_secs_f64());
+}
+
+// 系ダイナミクスを記述
+const M1: f64 = 150e-3;
+const R_W: f64 = 50e-3;
+const M2: f64 = 2.3 - 2.0 * M1 + 2.0;
+const L: f64 = 0.2474; // 重心までの距離
+const J1: f64 = M1 * R_W * R_W;
+const J2: f64 = 0.2;
+const G: f64 = 9.81;
+const KT: f64 = 0.15; // m2006
+const D: f64 = (M1 + M2 + J1 / R_W * R_W) * (M2 * L * L + J2) - M2 * M2 * L * L;
+fn dynamics(state: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
+    let mut x = *state;
+    x[3] += ((M1 + M2 + J1 / R_W * R_W) / D * M2 * G * L * x[2] - M2 * L / D / R_W * KT * u) * DT;
+    x[2] += x[3] * DT;
+    x[1] += (-M2 * M2 * G * L * L / D * x[2] + (M2 * L * L + J2) / D / R_W * KT * u) * DT;
+    x[0] += x[1] * DT;
+    x
 }
