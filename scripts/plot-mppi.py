@@ -108,13 +108,13 @@ interval = DT * 1000
 ani = FuncAnimation(fig, update_anim, fargs=(len(data_set),), interval=interval, frames=len(data_set), repeat=False)
 
 path = f"imgs/anim_mppi_{d}.mp4"
-s = f"<video src=\"{path}\" controls autoplay loop></video>\n"
+s = f"<video src=\"../{path}\" controls autoplay loop></video>\n"
 
 try:
     ani.save(path, writer="ffmpeg")
-    with open('anim.md', mode='r') as reader:
+    with open('imgs/anim.md', mode='r') as reader:
         s = s + reader.read()
-    with open("anim.md", mode='w') as f:
+    with open("imgs/anim.md", mode='w') as f:
         f.write(s)
     print(f"saved: {path}")
 except Exception as e:
