@@ -10,9 +10,9 @@ const N: usize = 8;
 const DT: f64 = T / N as f64;
 
 // 制御ホライゾン
-const K: usize = 4.19375e5 as usize;
+const K: usize = 8e5 as usize;
 const LAMBDA: f64 = 0.5;
-const R: f64 = 4.2;
+const R: f64 = 3.0;
 
 // 制約
 const LIMIT: (f64, f64) = (-20.0, 20.0);
