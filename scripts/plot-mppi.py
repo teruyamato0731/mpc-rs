@@ -119,7 +119,7 @@ try:
     print(f"saved: {path}")
 except Exception as e:
     print(e)
-    os.remove(f"imgs/anim_{d}.mp4")
+    os.remove(path)
 
 """
 xhost +local:

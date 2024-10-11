@@ -153,8 +153,6 @@ try:
     print(f"saved: {path}")
 except Exception as e:
     print(e)
-    os.remove(f"imgs/anim_{d}.mp4")
+    os.remove(path)
 
 # ani.save(f"imgs/anim_{d}.gif", writer="pillow")
-
-# imgs/anim_0.md
