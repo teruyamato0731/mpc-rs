@@ -1,6 +1,6 @@
 use optimization_engine::{panoc::*, *};
 extern crate nalgebra as na;
-use na::{matrix, stack, vector};
+use na::{matrix, vector};
 
 // 予測ホライゾン
 const T: f64 = 0.8;
@@ -41,10 +41,6 @@ fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
 
 fn cost(mut x: na::Vector4<f64>, u: &[f64]) -> f64 {
     let mut c = 0.0;
-    // for e in u.iter() {
-    //     x = dynamics(&x, *e);
-    //     c += x.dot(&(C * x));
-    // }
     let x_ref = gen_ref(&x);
     for (e, r) in u.iter().zip(x_ref.column_iter()) {
         x = dynamics(&x, *e);
@@ -53,35 +49,47 @@ fn cost(mut x: na::Vector4<f64>, u: &[f64]) -> f64 {
     c
 }
 
+macro_rules! create_a_matrix {
+    ($a:expr, $n:expr) => {{
+        let mut a = na::SMatrix::<f64, { 4 * $n }, 4>::zeros();
+        for i in 0..$n {
+            a.fixed_view_mut::<4, 4>(4 * i, 0)
+                .copy_from(&$a.pow((i + 1) as u32));
+        }
+        a
+    }};
+}
+macro_rules! create_g_matrix {
+    ($a:expr, $b:expr, $n:expr) => {{
+        let mut g = na::SMatrix::<f64, { 4 * $n }, $n>::zeros();
+        for i in 0..$n {
+            for j in 0..=i {
+                g.fixed_view_mut::<4, 1>(4 * i, j)
+                    .copy_from(&(A.pow((i - j) as u32) * B));
+            }
+        }
+        g
+    }};
+}
+macro_rules! create_q_matrix {
+    ($c:expr, $n:expr) => {{
+        let mut q = na::SMatrix::<f64, { 4 * $n }, { 4 * $n }>::zeros();
+        for i in 0..$n {
+            q.fixed_view_mut::<4, 4>(4 * i, 4 * i).copy_from(&$c);
+        }
+        q
+    }};
+}
+
 // コスト関数の勾配を数値微分によって求める(並列化版)
 // 1. 数値微分の基礎となるコストを計算
 // 2. 初期値xに運動方程式を適用し、kステップ先の状態を求める
 // 3. kステップ先の状態と、入力に対して微小な変化を加えてコストを計算
 // 4. 3.で求めたコストと1.のコストの差分を取り、微分を求める
 fn grad_cost(x: na::Vector4<f64>, u: &na::SVector<f64, N>) -> na::SVector<f64, N> {
-    let a: na::SMatrix<f64, 32, 4> = stack![
-        A.pow(1); A.pow(2); A.pow(3); A.pow(4); A.pow(5); A.pow(6); A.pow(7); A.pow(8);
-    ];
-    let g: na::SMatrix<f64, 32, 8> = stack![
-        B, 0, 0, 0, 0, 0, 0, 0;
-        A * B, B, 0, 0, 0, 0, 0, 0;
-        A.pow(2) * B, A * B, B, 0, 0, 0, 0, 0;
-        A.pow(3) * B, A.pow(2) * B, A * B, B, 0, 0, 0, 0;
-        A.pow(4) * B, A.pow(3) * B, A.pow(2) * B, A * B, B, 0, 0, 0;
-        A.pow(5) * B, A.pow(4) * B, A.pow(3) * B, A.pow(2) * B, A * B, B, 0, 0;
-        A.pow(6) * B, A.pow(5) * B, A.pow(4) * B, A.pow(3) * B, A.pow(2) * B, A * B, B, 0;
-        A.pow(7) * B, A.pow(6) * B, A.pow(5) * B, A.pow(4) * B, A.pow(3) * B, A.pow(2) * B, A * B, B;
-    ];
-    let q = stack![
-        C, 0, 0, 0, 0, 0, 0, 0;
-        0, C, 0, 0, 0, 0, 0, 0;
-        0, 0, C, 0, 0, 0, 0, 0;
-        0, 0, 0, C, 0, 0, 0, 0;
-        0, 0, 0, 0, C, 0, 0, 0;
-        0, 0, 0, 0, 0, C, 0, 0;
-        0, 0, 0, 0, 0, 0, C, 0;
-        0, 0, 0, 0, 0, 0, 0, C;
-    ];
+    let a: na::SMatrix<f64, { 4 * N }, 4> = create_a_matrix!(A, N);
+    let g: na::SMatrix<f64, { 4 * N }, N> = create_g_matrix!(A, B, N);
+    let q = create_q_matrix!(C, N);
 
     let x_ref = gen_ref(&x);
     let x_ref = na::SVector::from_iterator(x_ref.iter().copied());
@@ -100,7 +108,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut u = [0.0; N];
 
-    let mut x = vector![0.5, 0.0, 0.1, 0.0];
+    let mut x = vector![3.0, 0.0, 0.4, 0.0];
 
     const MAX_ITERS: usize = (5.0 / DT) as usize;
     for i in 0..MAX_ITERS + 1 {
