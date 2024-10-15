@@ -30,11 +30,10 @@ fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
     let mut r = na::SMatrix::<f64, 4, N>::zeros();
     for i in 0..N {
         let phase = std::f64::consts::PI * i as f64 / N as f64;
-        let phase_2 = std::f64::consts::PI / 2.0 * i as f64 / N as f64;
-        r[(0, i)] = x[0] * phase_2.cos();
-        r[(1, i)] = -x[0] * phase.sin();
-        r[(2, i)] = (-0.5 * x[0]).clamp(-0.45, 0.45) * phase_2.cos();
-        r[(3, i)] = (-0.5 * x[0]).clamp(-0.45, 0.45) * phase.sin();
+        r[(0, i)] = (x[0] * (1.0 + phase.cos())) / 2.0;
+        r[(1, i)] = (-0.4 * x[0]).clamp(-2.0, 2.0) * phase.sin();
+        r[(2, i)] = (-0.5 * x[0]).clamp(-0.35, 0.35) * (1.0 * phase.cos()) / 2.0;
+        r[(3, i)] = (-0.5 * x[0]).clamp(-1.5, 1.5) * phase.sin();
     }
     r
 }
@@ -108,7 +107,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut u = [0.0; N];
 
-    let mut x = vector![3.0, 0.0, 0.4, 0.0];
+    let mut x = vector![0.5, 0.0, 0.1, 0.0];
 
     const MAX_ITERS: usize = (5.0 / DT) as usize;
     for i in 0..MAX_ITERS + 1 {
