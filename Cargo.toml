@@ -20,6 +20,7 @@ rand_distr = "0.4.3"
 serialport = "4.4.0"
 zerocopy = { version = "0.7.35", features = ["derive"] }
 cobs-rs = "1.1.2"
+advanced-pid = { version = "0.2.2", features = ["f64"] }
 
 [profile.release]
 lto = "fat"

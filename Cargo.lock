@@ -3,6 +3,12 @@
 version = 3
 
 [[package]]
+name = "advanced-pid"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f362a7a18d309d27ab34dbea24aa0635c313162ebb6053f94939aa155d56c5b"
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -254,6 +260,7 @@ dependencies = [
 name = "mpc"
 version = "0.1.0"
 dependencies = [
+ "advanced-pid",
  "anyhow",
  "cobs-rs",
  "csv",
