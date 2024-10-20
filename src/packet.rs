@@ -17,27 +17,40 @@ pub struct Control {
 }
 
 impl State {
+    const SIZE: usize = std::mem::size_of::<Self>();
+    const BUF_SIZE: usize = Self::SIZE + 2;
+
     // cobsバイト列に変換
-    pub fn as_cobs(&self) -> [u8; 18] {
-        let buf: [u8; 16] = self.as_bytes().try_into().unwrap();
+    pub fn as_cobs(&self) -> [u8; Self::BUF_SIZE] {
+        let buf: [u8; Self::SIZE] = self.as_bytes().try_into().unwrap();
         cobs_rs::stuff(buf, 0)
     }
     // cobsバイト列から復元
-    pub fn from_cobs(buf: &[u8; 18]) -> Option<Self> {
-        let (cobs, _): ([u8; 16], _) = cobs_rs::unstuff(*buf, 0);
+    pub fn from_cobs(buf: &[u8; Self::BUF_SIZE]) -> Option<Self> {
+        let (cobs, _): ([u8; Self::SIZE], _) = cobs_rs::unstuff(*buf, 0);
         Self::read_from(&cobs)
     }
 }
 
 impl Control {
+    pub const MAX: i16 = 16000;
+    const SIZE: usize = std::mem::size_of::<Self>();
+    const BUF_SIZE: usize = Self::SIZE + 2;
+
     // cobsバイト列に変換
-    pub fn as_cobs(&self) -> [u8; 4] {
-        let buf: [u8; 2] = self.as_bytes().try_into().unwrap();
+    pub fn as_cobs(&self) -> [u8; Self::BUF_SIZE] {
+        let buf: [u8; Self::SIZE] = self.as_bytes().try_into().unwrap();
         cobs_rs::stuff(buf, 0)
     }
     // cobsバイト列から復元
-    pub fn from_cobs(buf: &[u8; 4]) -> Option<Self> {
-        let (cobs, _): ([u8; 2], _) = cobs_rs::unstuff(*buf, 0);
+    pub fn from_cobs(buf: &[u8; Self::BUF_SIZE]) -> Option<Self> {
+        let (cobs, _): ([u8; Self::SIZE], _) = cobs_rs::unstuff(*buf, 0);
         Self::read_from(&cobs)
+    }
+}
+
+impl From<State> for na::Vector4<f64> {
+    fn from(s: State) -> Self {
+        na::Vector4::new(s.x as f64, s.dx as f64, s.theta as f64, s.dtheta as f64)
     }
 }
