@@ -38,16 +38,6 @@ fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
     r
 }
 
-fn cost(mut x: na::Vector4<f64>, u: &[f64]) -> f64 {
-    let mut c = 0.0;
-    let x_ref = gen_ref(&x);
-    for (e, r) in u.iter().zip(x_ref.column_iter()) {
-        x = dynamics(&x, *e);
-        c += (x - r).dot(&(C * (x - r)));
-    }
-    c
-}
-
 macro_rules! create_a_matrix {
     ($a:expr, $n:expr) => {{
         let mut a = na::SMatrix::<f64, { 4 * $n }, 4>::zeros();
@@ -80,17 +70,29 @@ macro_rules! create_q_matrix {
     }};
 }
 
+fn cost(x: &na::Vector4<f64>, u: &na::SVector<f64, N>) -> f64 {
+    let a: na::SMatrix<f64, { 4 * N }, 4> = create_a_matrix!(A, N);
+    let g: na::SMatrix<f64, { 4 * N }, N> = create_g_matrix!(A, B, N);
+    let q = create_q_matrix!(C, N);
+
+    let x_ref = gen_ref(x);
+    let x_ref: na::SVector<f64, { 4 * N }> = na::SVector::from_iterator(x_ref.iter().copied());
+    let left = u.transpose() * g.transpose() * q * g * u;
+    let right = 2.0 * (x.transpose() * a.transpose() - x_ref.transpose()) * q * g * u;
+    left[0] + right[0]
+}
+
 // コスト関数の勾配を数値微分によって求める(並列化版)
 // 1. 数値微分の基礎となるコストを計算
 // 2. 初期値xに運動方程式を適用し、kステップ先の状態を求める
 // 3. kステップ先の状態と、入力に対して微小な変化を加えてコストを計算
 // 4. 3.で求めたコストと1.のコストの差分を取り、微分を求める
-fn grad_cost(x: na::Vector4<f64>, u: &na::SVector<f64, N>) -> na::SVector<f64, N> {
+fn grad_cost(x: &na::Vector4<f64>, u: &na::SVector<f64, N>) -> na::SVector<f64, N> {
     let a: na::SMatrix<f64, { 4 * N }, 4> = create_a_matrix!(A, N);
     let g: na::SMatrix<f64, { 4 * N }, N> = create_g_matrix!(A, B, N);
     let q = create_q_matrix!(C, N);
 
-    let x_ref = gen_ref(&x);
+    let x_ref = gen_ref(x);
     let x_ref = na::SVector::from_iterator(x_ref.iter().copied());
     2.0 * g.transpose() * q * (g * u + a * x - x_ref)
 }
@@ -112,17 +114,15 @@ fn main() -> anyhow::Result<()> {
     const MAX_ITERS: usize = (5.0 / DT) as usize;
     for i in 0..MAX_ITERS + 1 {
         let f = |u: &[f64], c: &mut f64| -> Result<(), SolverError> {
-            *c = cost(x, u);
+            let u = na::SVector::<f64, N>::from_iterator(u.iter().copied());
+            *c = cost(&x, &u);
             Ok(())
         };
 
         let df = |u: &[f64], grad: &mut [f64]| -> Result<(), SolverError> {
             let u = na::SVector::<f64, N>::from_iterator(u.iter().copied());
-            let g = grad_cost(x, &u);
-            // gradを更新
-            for (i, e) in g.iter().enumerate() {
-                grad[i] = *e;
-            }
+            let g = grad_cost(&x, &u);
+            grad.copy_from_slice(g.as_slice());
             Ok(())
         };
 
