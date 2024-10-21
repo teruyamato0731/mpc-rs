@@ -66,8 +66,7 @@ fn main() {
         // 0.1sごとに制御信号を送信
         if pre.elapsed() >= Duration::from_millis(100) {
             u_n = mppi.compute(&x, &u_n).unwrap();
-            let u = (Control::MAX as f64 * u_n[0]) as i16;
-            let c = Control { u };
+            let c = Control::from_current(u_n[0]);
             write(&mut port, &c);
             pre = std::time::Instant::now();
         }
