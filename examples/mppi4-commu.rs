@@ -82,14 +82,19 @@ const J1: f64 = M1 * R_W * R_W;
 const J2: f64 = 0.2;
 const G: f64 = 9.81;
 const KT: f64 = 0.15; // m2006
-const D: f64 = (M1 + M2 + J1 / R_W * R_W) * (M2 * L * L + J2) - M2 * M2 * L * L;
-fn dynamics(state: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
-    let mut x = *state;
-    x[3] += ((M1 + M2 + J1 / R_W * R_W) / D * M2 * G * L * x[2] - M2 * L / D / R_W * KT * u) * DT;
-    x[2] += x[3] * DT;
-    x[1] += (-M2 * M2 * G * L * L / D * x[2] + (M2 * L * L + J2) / D / R_W * KT * u) * DT;
-    x[0] += x[1] * DT;
-    x
+fn dynamics(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
+    let mut r = *x;
+    const D: f64 = (M1 + M2 + J1 / R_W * R_W) * (M2 * L * L + J2);
+    let d = D - M2 * M2 * L * L * x[2].cos() * x[2].cos();
+    let term1 = (M1 + M2 + J1 / R_W * R_W) * M2 * G * L * x[2].sin();
+    let term2 = (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin()) * M2 * L * x[2].cos();
+    r[3] += (term1 - term2) / d * DT;
+    r[2] += x[3] * DT;
+    let term3 = (J2 + M2 * L * L) * (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin());
+    let term4 = M2 * G * L * L * x[2].sin() * x[2].cos();
+    r[1] += (term3 + term4) / d * DT;
+    r[0] += x[1] * DT;
+    r
 }
 fn write(port: &mut Box<dyn serialport::SerialPort>, c: &Control) {
     let cobs = c.as_cobs();
