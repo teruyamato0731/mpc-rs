@@ -145,8 +145,8 @@ fn init_ukf() -> UnscentedKalmanFilter {
         0.0, 0.0, 0.5, 1.0;
     ];
     let r = matrix![
-        2.0, 0.0;
-        0.0, 200.0;
+        200.0, 0.0;
+        0.0, 2.0;
     ];
     UnscentedKalmanFilter::new(vector![0.0, 0.0, 0.0, 0.0], p, q, r)
 }
