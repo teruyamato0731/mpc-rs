@@ -3,6 +3,7 @@ use mpc::mppi::Mppi;
 use mpc::packet::{Control, Sensor};
 use mpc::ukf::UnscentedKalmanFilter;
 use na::{matrix, vector};
+use std::f64::consts::PI;
 use std::io::{BufRead, BufReader};
 use std::sync::mpsc;
 use std::thread;
@@ -111,10 +112,10 @@ fn dynamics(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
     r
 }
 // 観測関数
-fn hx(x_act: na::Vector4<f64>) -> na::Vector2<f64> {
+fn hx(state: na::Vector4<f64>) -> na::Vector2<f64> {
     vector![
-        x_act[1], // 駆動輪のオドメトリ
-        x_act[3], // 角速度
+        60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
+        state[3].to_radians(),              // 角速度 [rad/s] -> [deg/s]
     ]
 }
 fn write(port: &mut Box<dyn serialport::SerialPort>, c: &Control) {
