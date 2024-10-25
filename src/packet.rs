@@ -17,8 +17,8 @@ pub struct Control {
 }
 
 impl State {
-    const SIZE: usize = std::mem::size_of::<Self>();
-    const BUF_SIZE: usize = Self::SIZE + 2;
+    pub const SIZE: usize = std::mem::size_of::<Self>();
+    pub const BUF_SIZE: usize = Self::SIZE + 2;
 
     // cobsバイト列に変換
     pub fn as_cobs(&self) -> [u8; Self::BUF_SIZE] {
@@ -34,8 +34,8 @@ impl State {
 
 impl Control {
     pub const MAX: i16 = 16000;
-    const SIZE: usize = std::mem::size_of::<Self>();
-    const BUF_SIZE: usize = Self::SIZE + 2;
+    pub const SIZE: usize = std::mem::size_of::<Self>();
+    pub const BUF_SIZE: usize = Self::SIZE + 2;
 
     // cobsバイト列に変換
     pub fn as_cobs(&self) -> [u8; Self::BUF_SIZE] {
