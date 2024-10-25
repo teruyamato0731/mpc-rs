@@ -23,7 +23,7 @@ impl UnscentedKalmanFilter {
         r: na::Matrix2<f64>,
     ) -> Self {
         let (wm, wc) = Self::sigma_weight();
-        let sigma_f = Self::compute_sigma_points(x, p, 0.0, |x, _| x);
+        let sigma_f = Self::compute_sigma_points(x, p, 0.0, |x, _| *x);
         Self {
             x,
             p,
@@ -35,7 +35,7 @@ impl UnscentedKalmanFilter {
         }
     }
 
-    pub fn predict(&mut self, u: f64, fx: fn(na::Vector4<f64>, f64) -> na::Vector4<f64>) {
+    pub fn predict(&mut self, u: f64, fx: fn(&na::Vector4<f64>, f64) -> na::Vector4<f64>) {
         self.sigma_f = Self::compute_sigma_points(self.x, self.p, u, fx);
         let (x, p) = Self::unscented_transform(&self.sigma_f, &self.wm, &self.wc, &self.q);
         self.x = x;
@@ -69,11 +69,11 @@ impl UnscentedKalmanFilter {
         x: na::Vector4<f64>,
         p: na::Matrix4<f64>,
         u: f64,
-        fx: fn(na::Vector4<f64>, f64) -> na::Vector4<f64>,
+        fx: fn(&na::Vector4<f64>, f64) -> na::Vector4<f64>,
     ) -> na::SMatrix<f64, 4, 9> {
         let mut sigma_f = Self::sigma_points(&x, &p);
         for i in 0..9 {
-            sigma_f.set_column(i, &fx(sigma_f.column(i).into_owned(), u));
+            sigma_f.set_column(i, &fx(&sigma_f.column(i).into_owned(), u));
         }
         sigma_f
     }

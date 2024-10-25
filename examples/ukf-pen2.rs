@@ -27,12 +27,13 @@ const R: na::Matrix2<f64> = matrix![
 ];
 
 // 状態遷移関数
-fn fx(mut x: na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
-    x[3] += ((M1 + M2 + J1 / R_W * R_W) / D * M2 * G * L * x[2] - M2 * L / D / R_W * KT * u) * DT;
-    x[2] += x[3] * DT;
-    x[1] += (-M2 * M2 * G * L * L / D * x[2] + (M2 * L * L + J2) / D / R_W * KT * u) * DT;
-    x[0] += x[1] * DT;
-    x
+fn fx(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
+    let mut r = *x;
+    r[3] += ((M1 + M2 + J1 / R_W * R_W) / D * M2 * G * L * x[2] - M2 * L / D / R_W * KT * u) * DT;
+    r[2] += x[3] * DT;
+    r[1] += (-M2 * M2 * G * L * L / D * x[2] + (M2 * L * L + J2) / D / R_W * KT * u) * DT;
+    r[0] += x[1] * DT;
+    r
 }
 
 // 観測関数
@@ -70,7 +71,7 @@ fn main() {
     let mut ukf = UnscentedKalmanFilter::new(x_est, p, Q, R);
     for _ in 0..100 {
         let u = vector![0.0015];
-        x_act = fx(x_act, u[0]);
+        x_act = fx(&x_act, u[0]);
         ukf.predict(u[0], fx);
         let x_obs = sensor(x_act, &mut rng);
         ukf.update(&x_obs, hx);
