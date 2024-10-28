@@ -112,7 +112,7 @@ fn dynamics(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
     r
 }
 // 観測関数
-fn hx(state: na::Vector4<f64>) -> na::Vector2<f64> {
+fn hx(state: &na::Vector4<f64>) -> na::Vector2<f64> {
     vector![
         60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         state[3].to_radians(),              // 角速度 [rad/s] -> [deg/s]

@@ -45,11 +45,11 @@ impl UnscentedKalmanFilter {
     pub fn update(
         &mut self,
         x_obs: &na::Vector2<f64>,
-        hx: fn(na::Vector4<f64>) -> na::Vector2<f64>,
+        hx: fn(&na::Vector4<f64>) -> na::Vector2<f64>,
     ) {
         let mut sigmas_h = na::SMatrix::<f64, 2, 9>::zeros();
         for i in 0..9 {
-            sigmas_h.set_column(i, &hx(self.sigma_f.column(i).into_owned()));
+            sigmas_h.set_column(i, &hx(&self.sigma_f.column(i).into_owned()));
         }
         let (zp, pz) = Self::unscented_transform(&sigmas_h, &self.wm, &self.wc, &self.r);
         let mut pxz = na::SMatrix::<f64, 4, 2>::zeros();

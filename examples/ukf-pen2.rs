@@ -37,7 +37,7 @@ fn fx(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
 }
 
 // 観測関数
-fn hx(x_act: na::Vector4<f64>) -> na::Vector2<f64> {
+fn hx(x_act: &na::Vector4<f64>) -> na::Vector2<f64> {
     vector![
         x_act[1], // 駆動輪のオドメトリ
         x_act[3], // 角速度
