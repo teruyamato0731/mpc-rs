@@ -103,8 +103,9 @@ fn write(port: &mut Box<dyn serialport::SerialPort>, c: &Control) {
 // UARTを受取り、mpscに送信する
 fn read(reader: &mut BufReader<Box<dyn serialport::SerialPort>>) -> Option<State> {
     let mut buf = Vec::new();
-    let _len = reader.read_until(0x00, &mut buf).ok()?;
-    if let Ok(data) = buf.try_into() {
+    let len = reader.read_until(0x00, &mut buf).ok()?;
+    if len >= State::BUF_SIZE {
+        let data = buf[(len - State::BUF_SIZE)..len].try_into().ok()?;
         State::from_cobs(&data)
     } else {
         None

@@ -126,7 +126,8 @@ fn write(port: &mut Box<dyn serialport::SerialPort>, c: &Control) {
 fn read(reader: &mut BufReader<Box<dyn serialport::SerialPort>>) -> Option<Sensor> {
     let mut buf = Vec::new();
     let len = reader.read_until(0x00, &mut buf).ok()?;
-    if let Ok(data) = buf[len - Sensor::BUF_SIZE..len].try_into() {
+    if len >= Sensor::BUF_SIZE {
+        let data = buf[(len - Sensor::BUF_SIZE)..len].try_into().ok()?;
         Sensor::from_cobs(&data)
     } else {
         None
