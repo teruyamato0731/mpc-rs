@@ -5,7 +5,7 @@ use mpc::ukf::UnscentedKalmanFilter;
 use na::{matrix, vector};
 use std::f64::consts::PI;
 use std::io::{BufRead, BufReader};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -40,50 +40,95 @@ fn main() {
 
     let mut u_n = na::SVector::<f64, N>::zeros();
     let mut mppi = Mppi::<N, K>::new(dynamics, cost, LAMBDA, R, LIMIT);
-    let mut ukf = init_ukf();
+    let ukf_mutex = init_ukf();
+    let ukf_mutex2 = Arc::clone(&ukf_mutex);
 
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
+        let mut pre = std::time::Instant::now();
         // データが読み込まれるまで待機
         loop {
             if let Some(s) = read(&mut reader) {
-                tx.send(s).unwrap();
+                let x_obs = vector![s.encoder as f64, s.gyro as f64];
+                let (x, p) = {
+                    // ロックを取得できるまで待機
+                    let mut ukf = ukf_mutex.lock().expect("Failed to lock");
+                    ukf.update(&x_obs, hx);
+                    (ukf.state(), ukf.covariance())
+                };
+                print!("Received: {:6.3} {:6.3}, ", s.encoder, s.gyro);
+                print!(
+                    "est: [{:6.3}, {:6.3}, {:6.3}, {:6.3}] ",
+                    x[0], x[1], x[2], x[3]
+                );
+                println!(
+                    "p: [{:6.3}, {:6.3}, {:6.3}, {:6.3}]",
+                    p[(0, 0)],
+                    p[(1, 1)],
+                    p[(2, 2)],
+                    p[(3, 3)]
+                );
+
+                // θ が 60度 以上になったら終了
+                if x[2] > 60.0f64.to_radians() {
+                    println!("x[2] is over 60 degrees");
+                    break;
+                }
+                // xがnanの場合は終了
+                if x.iter().any(|x| x.is_nan()) {
+                    println!("x contains NaN");
+                    break;
+                }
+
+                // 一定周期で状態変数を送信
+                if pre.elapsed() > Duration::from_millis(10) {
+                    tx.send(x).unwrap();
+                    pre = std::time::Instant::now();
+                }
             }
         }
     });
 
-    let mut pre = std::time::Instant::now();
     loop {
         // データが読み込まれるまで待機
-        if let Ok(received) = rx.try_recv() {
-            print!("{:6.3} {:6.3} ", received.encoder, received.gyro);
-            let x_obs = vector![received.encoder as f64, received.gyro as f64];
-            ukf.update(&x_obs, hx);
-        }
+        if let Ok(x) = rx.recv() {
+            let x_now = {
+                let mut ukf = ukf_mutex2.lock().expect("Failed to lock");
+                ukf.predict(u_n[0], dynamics);
+                ukf.state()
+            };
 
-        let x = ukf.state();
-
-        // θ が 60度 以上になったら終了
-        if x[2] > 60.0f64.to_radians() {
-            println!("x[2] is over 60 degrees");
-            break;
-        }
-
-        // 一定周期で制御信号を送信
-        if pre.elapsed() > Duration::from_millis(10) {
-            pre = std::time::Instant::now();
+            if x != x_now {
+                println!("Mismatched state variables");
+                continue;
+            }
 
             if let Ok(u) = mppi.compute(&x, &u_n) {
                 u_n = u;
-                println!("Control: {:6.3}", u_n[0]);
+                print!("Control: {:6.3} ", u_n[0]);
             } else {
                 u_n = na::SVector::<f64, N>::zeros();
-                println!("Control: {:6.3}, Failed to compute ", u_n[0]);
+                print!("\x1b[93mControl: {:6.3}\x1b[0m ", u_n[0]);
             }
             let u = 1000.0 * u_n[0];
             let c = Control { u: u as i16 };
             write(&mut port, &c);
-            ukf.predict(u_n[0], dynamics);
+            let (x, p) = {
+                let mut ukf = ukf_mutex2.lock().expect("Failed to lock");
+                ukf.predict(u_n[0], dynamics);
+                (ukf.state(), ukf.covariance())
+            };
+            print!(
+                "est: [{:6.3}, {:6.3}, {:6.3}, {:6.3}] ",
+                x[0], x[1], x[2], x[3]
+            );
+            println!(
+                "p: [{:6.3}, {:6.3}, {:6.3}, {:6.3}]",
+                p[(0, 0)],
+                p[(1, 1)],
+                p[(2, 2)],
+                p[(3, 3)]
+            );
         }
     }
 }
@@ -97,9 +142,9 @@ const J1: f64 = M1 * R_W * R_W;
 const J2: f64 = 0.2;
 const G: f64 = 9.81;
 const KT: f64 = 0.15; // m2006
+const D: f64 = (M1 + M2 + J1 / R_W * R_W) * (M2 * L * L + J2);
 fn dynamics(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
     let mut r = *x;
-    const D: f64 = (M1 + M2 + J1 / R_W * R_W) * (M2 * L * L + J2);
     let d = D - M2 * M2 * L * L * x[2].cos() * x[2].cos();
     let term1 = (M1 + M2 + J1 / R_W * R_W) * M2 * G * L * x[2].sin();
     let term2 = (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin()) * M2 * L * x[2].cos();
@@ -133,7 +178,7 @@ fn read(reader: &mut BufReader<Box<dyn serialport::SerialPort>>) -> Option<Senso
         None
     }
 }
-fn init_ukf() -> UnscentedKalmanFilter {
+fn init_ukf() -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = matrix![
         10.0, 0.0, 0.0, 0.0;
         0.0, 10.0, 0.0, 0.0;
@@ -142,13 +187,15 @@ fn init_ukf() -> UnscentedKalmanFilter {
     ];
     let q = matrix![
         0.0, 0.0, 0.0, 0.0;
-        0.0, 1.0, 0.0, 0.0;
-        0.0, 0.0, 0.25, 0.5;
-        0.0, 0.0, 0.5, 1.0;
+        0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.05;
+        0.0, 0.0, 0.05, 5.0;
     ];
     let r = matrix![
         200.0, 0.0;
-        0.0, 2.0;
+        0.0, 10.0;
     ];
-    UnscentedKalmanFilter::new(vector![0.0, 0.0, 0.0, 0.0], p, q, r)
+    let x = vector![0.0, 0.0, 0.0, 0.0];
+    let obj = UnscentedKalmanFilter::new(x, p, q, r);
+    Arc::new(Mutex::new(obj))
 }
