@@ -70,16 +70,16 @@ fn main() {
         }
 
         // 一定周期で制御信号を送信
-        if pre.elapsed() > Duration::from_millis(30) {
+        if pre.elapsed() > Duration::from_millis(10) {
             pre = std::time::Instant::now();
 
             if let Ok(u) = mppi.compute(&x, &u_n) {
                 u_n = u;
+                println!("Control: {:6.3}", u_n[0]);
             } else {
                 u_n = na::SVector::<f64, N>::zeros();
-                print!("Failed to compute ");
+                println!("Control: {:6.3}, Failed to compute ", u_n[0]);
             }
-            println!("{:6.3}", u_n[0]);
             let u = 1000.0 * u_n[0];
             let c = Control { u: u as i16 };
             write(&mut port, &c);
