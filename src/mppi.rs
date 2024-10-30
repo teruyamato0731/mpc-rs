@@ -34,15 +34,16 @@ impl<const N: usize, const K: usize> Mppi<N, K> {
         x: &na::Vector4<f64>,
         u_n: &na::SVector<f64, N>,
     ) -> Result<na::SVector<f64, N>, &'static str> {
-        let mut rng = rand::thread_rng();
         let dist = rand_distr::Normal::<f64>::new(0.0, self.std_dev).unwrap();
-        let v_k_n: Vec<na::SVector<f64, N>> = (0..K)
+        let v_k_n = (0..K)
+            .into_par_iter()
             .map(|_| {
+                let mut rng = rand::thread_rng();
                 u_n + na::SVector::<f64, N>::from_fn(|_, _| {
                     dist.sample(&mut rng).clamp(self.limit.0, self.limit.1)
                 })
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         // 並列処理でコスト・重みの計算を行う
         let mut c_k = vec![0.0; K];
@@ -77,8 +78,8 @@ impl<const N: usize, const K: usize> Mppi<N, K> {
         // 重み付け平均
         let u_n = w_k
             .par_iter()
-            .enumerate()
-            .map(|(i, w)| *w * v_k_n[i] / sum)
+            .zip(v_k_n.par_iter())
+            .map(|(w, v_k)| *w * v_k / sum)
             .reduce(na::SVector::<f64, N>::zeros, |acc, x| acc + x);
 
         // u が 不正値の場合は終了
