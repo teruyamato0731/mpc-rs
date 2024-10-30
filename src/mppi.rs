@@ -1,11 +1,9 @@
 use rand::prelude::*;
-use rand::rngs::ThreadRng;
 use rayon::prelude::*;
 
 // MPPI (Model Predictive Path Integral) controller
+#[derive(Clone)]
 pub struct Mppi<const N: usize, const K: usize> {
-    rng: ThreadRng,
-    dist: rand_distr::Normal<f64>,
     limit: (f64, f64),
     dynamics: fn(&na::Vector4<f64>, f64) -> na::Vector4<f64>,
     cost: fn(&na::Vector4<f64>) -> f64,
@@ -21,11 +19,7 @@ impl<const N: usize, const K: usize> Mppi<N, K> {
         std_dev: f64,
         limit: (f64, f64),
     ) -> Self {
-        let rng = rand::thread_rng();
-        let dist = rand_distr::Normal::<f64>::new(0.0, std_dev).unwrap();
         Self {
-            rng,
-            dist,
             limit,
             dynamics,
             cost,
@@ -40,12 +34,12 @@ impl<const N: usize, const K: usize> Mppi<N, K> {
         x: &na::Vector4<f64>,
         u_n: &na::SVector<f64, N>,
     ) -> Result<na::SVector<f64, N>, &'static str> {
+        let mut rng = rand::thread_rng();
+        let dist = rand_distr::Normal::<f64>::new(0.0, self.std_dev).unwrap();
         let v_k_n: Vec<na::SVector<f64, N>> = (0..K)
             .map(|_| {
                 u_n + na::SVector::<f64, N>::from_fn(|_, _| {
-                    self.dist
-                        .sample(&mut self.rng)
-                        .clamp(self.limit.0, self.limit.1)
+                    dist.sample(&mut rng).clamp(self.limit.0, self.limit.1)
                 })
             })
             .collect();
