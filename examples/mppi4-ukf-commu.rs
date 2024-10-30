@@ -5,7 +5,7 @@ use mpc::ukf::UnscentedKalmanFilter;
 use na::{matrix, vector};
 use std::f64::consts::PI;
 use std::io::{BufRead, BufReader};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -43,9 +43,7 @@ fn main() {
     let ukf_mutex = init_ukf();
     let ukf_mutex2 = Arc::clone(&ukf_mutex);
 
-    let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let mut pre = std::time::Instant::now();
         // データが読み込まれるまで待機
         loop {
             if let Some(s) = read(&mut reader) {
@@ -56,7 +54,10 @@ fn main() {
                     ukf.update(&x_obs, hx);
                     (ukf.state(), ukf.covariance())
                 };
-                print!("Received: {:6.3} {:6.3}, ", s.encoder, s.gyro);
+                print!(
+                    "\x1b[32mReceived:\x1b[0m {:6.3} {:6.3}, ",
+                    s.encoder, s.gyro
+                );
                 print!(
                     "est: [{:6.3}, {:6.3}, {:6.3}, {:6.3}] ",
                     x[0], x[1], x[2], x[3]
@@ -68,47 +69,38 @@ fn main() {
                     p[(2, 2)],
                     p[(3, 3)]
                 );
-
-                // θ が 60度 以上になったら終了
-                if x[2] > 60.0f64.to_radians() {
-                    println!("x[2] is over 60 degrees");
-                    break;
-                }
-                // xがnanの場合は終了
-                if x.iter().any(|x| x.is_nan()) {
-                    println!("x contains NaN");
-                    break;
-                }
-
-                // 一定周期で状態変数を送信
-                if pre.elapsed() > Duration::from_millis(10) {
-                    tx.send(x).unwrap();
-                    pre = std::time::Instant::now();
-                }
             }
         }
     });
 
+    let mut pre = std::time::Instant::now();
     loop {
         // データが読み込まれるまで待機
-        if let Ok(x) = rx.recv() {
-            let x_now = {
-                let mut ukf = ukf_mutex2.lock().expect("Failed to lock");
-                ukf.predict(u_n[0], dynamics);
+        if pre.elapsed() > Duration::from_millis(10) {
+            pre = std::time::Instant::now();
+
+            let x = {
+                let ukf = ukf_mutex2.lock().expect("Failed to lock");
                 ukf.state()
             };
 
-            if x != x_now {
-                println!("Mismatched state variables");
-                continue;
+            // θ が 60度 以上になったら終了
+            if x[2] > 60.0f64.to_radians() {
+                println!("x[2] is over 60 degrees");
+                break;
+            }
+            // xがnanの場合は終了
+            if x.iter().any(|x| x.is_nan()) {
+                println!("x contains NaN");
+                break;
             }
 
             if let Ok(u) = mppi.compute(&x, &u_n) {
                 u_n = u;
-                print!("Control: {:6.3} ", u_n[0]);
+                print!("\x1b[33mControl:\x1b[0m {:6.3} ", u_n[0]);
             } else {
                 u_n = na::SVector::<f64, N>::zeros();
-                print!("\x1b[93mControl: {:6.3}\x1b[0m ", u_n[0]);
+                print!("\x1b[31mControl:\x1b[0m {:6.3} ", u_n[0]);
             }
             let u = 1000.0 * u_n[0];
             let c = Control { u: u as i16 };
