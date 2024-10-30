@@ -85,7 +85,7 @@ fn main() {
             };
 
             // θ が 60度 以上になったら終了
-            if x[2] > 60.0f64.to_radians() {
+            if x[2].abs() > 60.0f64.to_radians() {
                 println!("x[2] is over 60 degrees");
                 break;
             }
