@@ -1,5 +1,9 @@
 extern crate nalgebra as na;
 use mpc::mppi::Mppi;
+use mpc::ukf::UnscentedKalmanFilter;
+use na::matrix;
+use rand_distr::Distribution;
+use std::f64::consts::PI;
 
 // 予測ホライゾン
 const T: f64 = 0.8;
@@ -28,6 +32,7 @@ fn main() {
     let mut u_n = na::SVector::<f64, N>::zeros();
 
     let mut mppi = Mppi::<N, K>::new(dynamics, cost, LAMBDA, R, LIMIT);
+    let mut ukf = init_ukf(&x);
 
     // ログファイルの作成
     let file_path = "logs/mppi.csv";
@@ -36,18 +41,17 @@ fn main() {
     let start = std::time::Instant::now();
     let mut pre = start;
     while start.elapsed().as_secs_f64() < 10.0 {
-        u_n = mppi.compute(&x, &u_n).unwrap();
+        let x_est = ukf.state();
+        u_n = mppi.compute(&x_est, &u_n).unwrap();
+        ukf.predict(u_n[0], dynamics);
         x = dynamics_short(&x, u_n[0], pre.elapsed().as_secs_f64());
+        let x_obs = sensor(&x);
+        ukf.update(&x_obs, hx);
         pre = std::time::Instant::now();
 
         println!(
-            "t: {:.2}, u: {:8.3}, x: [{:10.4}, {:6.2}, {:5.2}, {:5.2}]",
-            start.elapsed().as_secs_f64(),
-            u_n[0],
-            x[0],
-            x[1],
-            x[2],
-            x[3]
+            "t: {:.2}, u: {:8.3}, x: [{:10.4}, {:6.2}, {:5.2}, {:5.2}], est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}]",
+            start.elapsed().as_secs_f64(), u_n[0], x[0], x[1], x[2], x[3], x_est[0], x_est[1], x_est[2], x_est[3]
         );
 
         wtr.write_record(&[
@@ -108,4 +112,38 @@ fn dynamics_short(x: &na::Vector4<f64>, u: f64, dt: f64) -> na::Vector4<f64> {
     r[1] += (term3 + term4) / d * dt;
     r[0] += x[1] * dt;
     r
+}
+
+fn init_ukf(init: &na::Vector4<f64>) -> UnscentedKalmanFilter {
+    let p = matrix![
+        3.0, 0.0, 0.0, 0.0;
+        0.0, 3.0, 0.0, 0.0;
+        0.0, 0.0, 3.0, 0.0;
+        0.0, 0.0, 0.0, 3.0;
+    ];
+    let q = matrix![
+        0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.05;
+        0.0, 0.0, 0.05, 5.0;
+    ];
+    let r = matrix![
+        500.0, 0.0;
+        0.0, 10.0;
+    ];
+    UnscentedKalmanFilter::new(*init, p, q, r)
+}
+
+fn sensor(x: &na::Vector4<f64>) -> na::Vector2<f64> {
+    let mut rng = rand::thread_rng();
+    let dist = rand_distr::Normal::<f64>::new(0.0, 1.0).unwrap();
+    let noise = na::Vector2::new(50.0 * dist.sample(&mut rng), 0.5 * dist.sample(&mut rng));
+    hx(x) + noise
+}
+
+fn hx(state: &na::Vector4<f64>) -> na::Vector2<f64> {
+    na::Vector2::new(
+        60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
+        state[3].to_degrees(),              // 角速度 [rad/s] -> [deg/s]
+    )
 }
