@@ -114,7 +114,10 @@ impl UnscentedKalmanFilter {
     }
 
     fn sigma_points(x: &na::Vector4<f64>, p: &na::Matrix4<f64>) -> na::SMatrix<f64, 4, 9> {
-        let l = (Self::C * p).cholesky().expect("Cholesky fail").l();
+        let svd = (Self::C * p).svd_unordered(true, false);
+        let s_sqrt = na::Matrix4::<f64>::from_diagonal(&svd.singular_values.map(|x| x.sqrt()));
+        let u = svd.u.unwrap();
+        let l = u * s_sqrt;
         na::SMatrix::<f64, 4, 9>::from_columns(&[
             *x,
             *x + l.column(0),
