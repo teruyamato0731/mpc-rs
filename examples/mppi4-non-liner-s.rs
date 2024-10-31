@@ -5,12 +5,11 @@ use mpc::mppi::Mppi;
 const T: f64 = 0.8;
 const N: usize = 8;
 const DT: f64 = T / N as f64;
-const DT_S: f64 = 10e-3;
 
 // 制御ホライゾン
-const K: usize = 8e3 as usize;
+const K: usize = 15e5 as usize;
 const LAMBDA: f64 = 0.5;
-const R: f64 = 3.0;
+const R: f64 = 5.0;
 
 // 制約
 const LIMIT: (f64, f64) = (-20.0, 20.0);
@@ -34,40 +33,41 @@ fn main() {
     let file_path = "logs/mppi.csv";
     let mut wtr = csv::Writer::from_path(file_path).expect("file open error");
 
-    let now = std::time::Instant::now();
-    let mut t = 0.0;
-    while t < 10.0 {
+    let start = std::time::Instant::now();
+    let mut pre = start;
+    while start.elapsed().as_secs_f64() < 10.0 {
         u_n = mppi.compute(&x, &u_n).unwrap();
-        x = dynamics_short(&x, u_n[0]);
+        x = dynamics_short(&x, u_n[0], pre.elapsed().as_secs_f64());
+        pre = std::time::Instant::now();
 
-        // 0.1秒ごとにログを記録
-        if (t / DT_S) as i32 % (0.1 / DT_S) as i32 == 0 {
-            println!(
-                "t: {:.2}, u: {:8.3}, x: [{:10.4}, {:6.2}, {:5.2}, {:5.2}]",
-                t, u_n[0], x[0], x[1], x[2], x[3]
-            );
+        println!(
+            "t: {:.2}, u: {:8.3}, x: [{:10.4}, {:6.2}, {:5.2}, {:5.2}]",
+            start.elapsed().as_secs_f64(),
+            u_n[0],
+            x[0],
+            x[1],
+            x[2],
+            x[3]
+        );
 
-            wtr.write_record(&[
-                t.to_string(),
-                u_n[0].to_string(),
-                x[0].to_string(),
-                x[1].to_string(),
-                x[2].to_string(),
-                x[3].to_string(),
-            ])
-            .expect("write error");
-            wtr.flush().expect("flush error");
-        }
+        wtr.write_record(&[
+            start.elapsed().as_secs_f64().to_string(),
+            u_n[0].to_string(),
+            x[0].to_string(),
+            x[1].to_string(),
+            x[2].to_string(),
+            x[3].to_string(),
+        ])
+        .expect("write error");
+        wtr.flush().expect("flush error");
 
         // x[2] が 60度 以上になったら終了
         if x[2].abs() > 60.0f64.to_radians() {
             println!("x[2] is over 60 degrees");
             break;
         }
-
-        t += DT_S;
     }
-    println!("elapsed: {:.2} sec", now.elapsed().as_secs_f64());
+    println!("elapsed: {:.2} sec", start.elapsed().as_secs_f64());
 }
 
 // 系ダイナミクスを記述
@@ -95,17 +95,17 @@ fn dynamics(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
 }
 
 // 系ダイナミクスを記述
-fn dynamics_short(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
+fn dynamics_short(x: &na::Vector4<f64>, u: f64, dt: f64) -> na::Vector4<f64> {
     let mut r = *x;
     const D: f64 = (M1 + M2 + J1 / R_W * R_W) * (M2 * L * L + J2);
     let d = D - M2 * M2 * L * L * x[2].cos() * x[2].cos();
     let term1 = (M1 + M2 + J1 / R_W * R_W) * M2 * G * L * x[2].sin();
     let term2 = (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin()) * M2 * L * x[2].cos();
-    r[3] += (term1 - term2) / d * DT_S;
-    r[2] += x[3] * DT_S;
+    r[3] += (term1 - term2) / d * dt;
+    r[2] += x[3] * dt;
     let term3 = (J2 + M2 * L * L) * (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin());
     let term4 = M2 * G * L * L * x[2].sin() * x[2].cos();
-    r[1] += (term3 + term4) / d * DT_S;
-    r[0] += x[1] * DT_S;
+    r[1] += (term3 + term4) / d * dt;
+    r[0] += x[1] * dt;
     r
 }
