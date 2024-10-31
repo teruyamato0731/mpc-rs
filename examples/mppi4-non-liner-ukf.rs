@@ -12,9 +12,9 @@ const N: usize = 8;
 const DT: f64 = T / N as f64;
 
 // 制御ホライゾン
-const K: usize = 5e5 as usize;
+const K: usize = 15e5 as usize;
 const LAMBDA: f64 = 0.5;
-const R: f64 = 3.0;
+const R: f64 = 5.0;
 
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
@@ -124,7 +124,7 @@ fn init_ukf(init: &na::Vector4<f64>) -> UnscentedKalmanFilter {
         0.0, 0.0, 0.05, 5.0;
     ];
     let r = matrix![
-        200.0, 0.0;
+        500.0, 0.0;
         0.0, 10.0;
     ];
     UnscentedKalmanFilter::new(*init, p, q, r)
