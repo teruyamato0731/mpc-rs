@@ -65,8 +65,6 @@ impl UnscentedKalmanFilter {
         self.p -= k * pz * k.transpose();
         // 対称性の維持
         self.p = (self.p + self.p.transpose()) / 2.0;
-        // 半正定値性の維持
-        self.p.iter_mut().for_each(|x| *x = x.max(0.0));
     }
 
     fn compute_sigma_points<F>(
