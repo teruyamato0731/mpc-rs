@@ -4,6 +4,9 @@ use mpc::ukf::UnscentedKalmanFilter;
 use na::matrix;
 use rand_distr::Distribution;
 use std::f64::consts::PI;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 // 予測ホライゾン
 const T: f64 = 0.8;
@@ -13,7 +16,7 @@ const DT: f64 = T / N as f64;
 // 制御ホライゾン
 const K: usize = 15e5 as usize;
 const LAMBDA: f64 = 0.5;
-const R: f64 = 5.0;
+const R: f64 = 10.0;
 
 // 制約
 const LIMIT: (f64, f64) = (-20.0, 20.0);
@@ -28,45 +31,134 @@ fn cost(x: &na::Vector4<f64>) -> f64 {
 }
 
 fn main() {
-    let mut x = na::Vector4::new(0.5, 0.0, 0.1, 0.0);
-    let mut u_n = na::SVector::<f64, N>::zeros();
+    let init = na::Vector4::new(0.0, 0.0, 0.01, 0.0);
+    let x = Arc::new(Mutex::new(init));
+    let x1 = x.clone();
+    let init_u_n = na::SVector::<f64, N>::zeros();
+    let u_n_mutex = Arc::new(Mutex::new(init_u_n));
+    let u_n_mutex2 = u_n_mutex.clone();
 
     let mut mppi = Mppi::<N, K>::new(dynamics, cost, LAMBDA, R, LIMIT);
-    let mut ukf = init_ukf(&x);
+    let ukf_mutex = init_ukf(&init);
+    let ukf_mutex2 = ukf_mutex.clone();
 
     // ログファイルの作成
     let file_path = "logs/mppi.csv";
     let mut wtr = csv::Writer::from_path(file_path).expect("file open error");
 
-    let start = std::time::Instant::now();
-    let mut pre = start;
-    while start.elapsed().as_secs_f64() < 10.0 {
-        let x_est = ukf.state();
-        u_n = mppi.compute(&x_est, &u_n).unwrap();
-        ukf.predict(u_n[0], dynamics);
-        x = dynamics_short(&x, u_n[0], pre.elapsed().as_secs_f64());
-        let x_obs = sensor(&x);
-        ukf.update(&x_obs, hx);
-        pre = std::time::Instant::now();
+    thread::spawn(move || {
+        let start = std::time::Instant::now();
+        let mut pre = start;
+        loop {
+            {
+                let mut x = x.lock().unwrap();
+                let u_n = *u_n_mutex2.lock().unwrap();
+                *x = dynamics_short(&x, u_n[0], pre.elapsed().as_secs_f64());
+            }
+            pre = std::time::Instant::now();
+            // thread::sleep(Duration::from_millis(1));
+        }
+    });
 
-        println!(
-            "t: {:.2}, u: {:8.3}, x: [{:10.4}, {:6.2}, {:5.2}, {:5.2}], est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}]",
-            start.elapsed().as_secs_f64(), u_n[0], x[0], x[1], x[2], x[3], x_est[0], x_est[1], x_est[2], x_est[3]
+    thread::spawn(move || {
+        // データが読み込まれるまで待機
+        let start = std::time::Instant::now();
+        loop {
+            let x = {
+                // ロックを取得できるまで待機
+                let x = x1.lock().expect("Failed to lock");
+                *x
+            };
+            let x_obs = sensor(&x);
+            // センサの遅延
+            thread::sleep(Duration::from_millis(30));
+            let (x_est, p) = {
+                // ロックを取得できるまで待機
+                let mut ukf = ukf_mutex.lock().expect("Failed to lock");
+                ukf.update(&x_obs, hx);
+                (ukf.state(), ukf.covariance())
+            };
+            print!("\x1b[36mRcv: \x1b[m");
+            print!("t: {:.2} ", start.elapsed().as_secs_f64());
+            print!(
+                "est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                x_est[0], x_est[1], x_est[2], x_est[3]
+            );
+            print!(
+                "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                p[(0, 0)],
+                p[(1, 1)],
+                p[(2, 2)],
+                p[(3, 3)]
+            );
+            print!(
+                "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                x[0], x[1], x[2], x[3]
+            );
+            println!();
+            // 次の送信まで待機
+            thread::sleep(Duration::from_millis(70));
+        }
+    });
+
+    let start = std::time::Instant::now();
+    while start.elapsed().as_secs_f64() < 10.0 {
+        let x_est = {
+            // ロックを取得できるまで待機
+            let ukf = ukf_mutex2.lock().expect("Failed to lock");
+            ukf.state()
+        };
+        let u_n = {
+            let u_n = u_n_mutex.lock().unwrap();
+            *u_n
+        };
+        let u_n = match mppi.compute(&x_est, &u_n) {
+            Ok(u) => u,
+            Err(e) => {
+                println!("\x1b[31mFailed to compute MPPI: {:?}\x1b[m", e);
+                na::SVector::<f64, N>::zeros()
+            }
+        };
+        {
+            let mut tmp = u_n_mutex.lock().unwrap();
+            *tmp = u_n;
+        }
+        let (x_est, p) = {
+            // ロックを取得できるまで待機
+            let mut ukf = ukf_mutex2.lock().expect("Failed to lock");
+            ukf.predict(u_n[0], dynamics);
+            (ukf.state(), ukf.covariance())
+        };
+
+        print!("\x1b[32mCon: \x1b[m");
+        print!("t: {:.2} ", start.elapsed().as_secs_f64());
+        print!(
+            "est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
+            x_est[0], x_est[1], x_est[2], x_est[3]
         );
+        print!(
+            "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
+            p[(0, 0)],
+            p[(1, 1)],
+            p[(2, 2)],
+            p[(3, 3)]
+        );
+        print!("u: {:8.3} ", u_n[0]);
+        println!();
 
         wtr.write_record(&[
             start.elapsed().as_secs_f64().to_string(),
             u_n[0].to_string(),
-            x[0].to_string(),
-            x[1].to_string(),
-            x[2].to_string(),
-            x[3].to_string(),
+            x_est[0].to_string(),
+            x_est[1].to_string(),
+            x_est[2].to_string(),
+            x_est[3].to_string(),
         ])
         .expect("write error");
         wtr.flush().expect("flush error");
 
         // x[2] が 60度 以上になったら終了
-        if x[2].abs() > 60.0f64.to_radians() {
+        if x_est[2].abs() > 60.0f64.to_radians() {
             println!("x[2] is over 60 degrees");
             break;
         }
@@ -114,24 +206,25 @@ fn dynamics_short(x: &na::Vector4<f64>, u: f64, dt: f64) -> na::Vector4<f64> {
     r
 }
 
-fn init_ukf(init: &na::Vector4<f64>) -> UnscentedKalmanFilter {
+fn init_ukf(init: &na::Vector4<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = matrix![
-        3.0, 0.0, 0.0, 0.0;
-        0.0, 3.0, 0.0, 0.0;
-        0.0, 0.0, 3.0, 0.0;
-        0.0, 0.0, 0.0, 3.0;
+        15.0, 0.0, 0.0, 0.0;
+        0.0, 15.0, 0.0, 0.0;
+        0.0, 0.0, 15.0, 0.0;
+        0.0, 0.0, 0.0, 15.0;
     ];
     let q = matrix![
         0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.05;
-        0.0, 0.0, 0.05, 5.0;
+        0.0, 0.0, 0.0, 10.0e-4;
+        0.0, 0.0, 10.0e-4, 10.0e-2;
+        0.0, 10.0e-4, 10.0e-2, 10.0;
     ];
     let r = matrix![
-        500.0, 0.0;
-        0.0, 10.0;
+        50.0, 0.0;
+        0.0, 3.0;
     ];
-    UnscentedKalmanFilter::new(*init, p, q, r)
+    let obj = UnscentedKalmanFilter::new(*init, p, q, r);
+    Arc::new(Mutex::new(obj))
 }
 
 fn sensor(x: &na::Vector4<f64>) -> na::Vector2<f64> {
