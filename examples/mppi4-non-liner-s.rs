@@ -37,6 +37,7 @@ fn main() {
     let init_u_n = na::SVector::<f64, N>::zeros();
     let u_n_mutex = Arc::new(Mutex::new(init_u_n));
     let u_n_mutex2 = u_n_mutex.clone();
+    let u_n_mutex3 = u_n_mutex.clone();
 
     let mut mppi = Mppi::<N, K>::new(dynamics, cost, LAMBDA, R, LIMIT);
     let ukf_mutex = init_ukf(&init);
@@ -63,6 +64,7 @@ fn main() {
     thread::spawn(move || {
         // データが読み込まれるまで待機
         let start = std::time::Instant::now();
+        let mut pre = start;
         loop {
             let x = {
                 // ロックを取得できるまで待機
@@ -71,10 +73,18 @@ fn main() {
             };
             let x_obs = sensor(&x);
             // センサの遅延
-            thread::sleep(Duration::from_millis(30));
+            thread::sleep(Duration::from_millis(5));
+            let u_n = {
+                let u_n = u_n_mutex3.lock().unwrap();
+                *u_n
+            };
             let (x_est, p) = {
                 // ロックを取得できるまで待機
                 let mut ukf = ukf_mutex.lock().expect("Failed to lock");
+                let dt = pre.elapsed().as_secs_f64();
+                pre = std::time::Instant::now();
+                let fx = |x: &na::Vector4<f64>, u: f64| dynamics_short(x, u, dt);
+                ukf.predict(u_n[0], fx);
                 ukf.update(&x_obs, hx);
                 (ukf.state(), ukf.covariance())
             };
@@ -97,16 +107,16 @@ fn main() {
             );
             println!();
             // 次の送信まで待機
-            thread::sleep(Duration::from_millis(70));
+            thread::sleep(Duration::from_millis(5));
         }
     });
 
     let start = std::time::Instant::now();
     while start.elapsed().as_secs_f64() < 10.0 {
-        let x_est = {
+        let (x_est, p) = {
             // ロックを取得できるまで待機
             let ukf = ukf_mutex2.lock().expect("Failed to lock");
-            ukf.state()
+            (ukf.state(), ukf.covariance())
         };
         let u_n = {
             let u_n = u_n_mutex.lock().unwrap();
@@ -123,12 +133,6 @@ fn main() {
             let mut tmp = u_n_mutex.lock().unwrap();
             *tmp = u_n;
         }
-        let (x_est, p) = {
-            // ロックを取得できるまで待機
-            let mut ukf = ukf_mutex2.lock().expect("Failed to lock");
-            ukf.predict(u_n[0], dynamics);
-            (ukf.state(), ukf.covariance())
-        };
 
         print!("\x1b[32mCon: \x1b[m");
         print!("t: {:.2} ", start.elapsed().as_secs_f64());
