@@ -21,9 +21,10 @@ const Q: na::Matrix4<f64> = matrix![
     0.0, 0.0, 0.0, 0.0;
     0.0, 0.0, 0.0, 0.25;
 ];
-const R: na::Matrix2<f64> = matrix![
-    100.0, 0.0;
-    0.0, 0.5;
+const R: na::Matrix3<f64> = matrix![
+    100.0, 0.0, 0.0;
+    0.0, 100.0, 0.0;
+    0.0, 0.0, 0.5;
 ];
 
 // 系ダイナミクスを記述
@@ -43,17 +44,22 @@ fn fx(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
 }
 
 // 観測関数
-fn hx(x_act: &na::Vector4<f64>) -> na::Vector2<f64> {
+fn hx(x_act: &na::Vector4<f64>) -> na::Vector3<f64> {
     vector![
+        60.0 / (2.0 * PI * R_W) * x_act[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         60.0 / (2.0 * PI * R_W) * x_act[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         x_act[3].to_degrees(),              // 角速度 [rad/s] -> [deg/s]
     ]
 }
 
 // センサ出力をシミュレーション
-fn sensor(x_act: na::Vector4<f64>, rng: &mut rand::rngs::ThreadRng) -> na::Vector2<f64> {
+fn sensor(x_act: na::Vector4<f64>, rng: &mut rand::rngs::ThreadRng) -> na::Vector3<f64> {
     let dist = Normal::new(0.0, 1.0).unwrap();
-    let noise = na::Vector2::new(100.0 * dist.sample(rng), 0.5 * dist.sample(rng));
+    let noise = na::Vector3::new(
+        100.0 * dist.sample(rng),
+        100.0 * dist.sample(rng),
+        0.5 * dist.sample(rng),
+    );
     hx(&x_act) + noise
 }
 

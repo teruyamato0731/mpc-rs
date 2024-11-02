@@ -19,8 +19,8 @@ pub struct Control {
 #[derive(Debug, AsBytes, FromBytes, FromZeroes)]
 #[repr(C)]
 pub struct Sensor {
-    pub encoder: f32, // 駆動輪のオドメトリ
-    pub gyro: f32,    // ジャイロセンサの角速度
+    pub encoder: [i16; 2], // 駆動輪のオドメトリ
+    pub gyro: f32,         // ジャイロセンサの角速度
 }
 
 impl State {
@@ -83,8 +83,8 @@ impl From<State> for na::Vector4<f64> {
     }
 }
 
-impl From<Sensor> for na::Vector2<f64> {
+impl From<Sensor> for na::Vector3<f64> {
     fn from(s: Sensor) -> Self {
-        na::Vector2::new(s.encoder as f64, s.gyro as f64)
+        na::Vector3::new(s.encoder[0] as f64, s.encoder[1] as f64, s.gyro as f64)
     }
 }

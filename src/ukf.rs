@@ -2,7 +2,7 @@ pub struct UnscentedKalmanFilter {
     x: na::Vector4<f64>,
     p: na::Matrix4<f64>,
     q: na::Matrix4<f64>,
-    r: na::Matrix2<f64>,
+    r: na::Matrix3<f64>,
     wm: na::SVector<f64, 9>,
     wc: na::SVector<f64, 9>,
     sigma_f: na::SMatrix<f64, 4, 9>,
@@ -20,7 +20,7 @@ impl UnscentedKalmanFilter {
         x: na::Vector4<f64>,
         p: na::Matrix4<f64>,
         q: na::Matrix4<f64>,
-        r: na::Matrix2<f64>,
+        r: na::Matrix3<f64>,
     ) -> Self {
         let (wm, wc) = Self::sigma_weight();
         let sigma_f = Self::compute_sigma_points(x, p, 0.0, |x, _| *x);
@@ -45,16 +45,16 @@ impl UnscentedKalmanFilter {
         self.p = p;
     }
 
-    pub fn update<F>(&mut self, x_obs: &na::Vector2<f64>, hx: F)
+    pub fn update<F>(&mut self, x_obs: &na::Vector3<f64>, hx: F)
     where
-        F: Fn(&na::Vector4<f64>) -> na::Vector2<f64>,
+        F: Fn(&na::Vector4<f64>) -> na::Vector3<f64>,
     {
-        let mut sigmas_h = na::SMatrix::<f64, 2, 9>::zeros();
+        let mut sigmas_h = na::SMatrix::<f64, 3, 9>::zeros();
         for i in 0..9 {
             sigmas_h.set_column(i, &hx(&self.sigma_f.column(i).into_owned()));
         }
         let (zp, pz) = Self::unscented_transform(&sigmas_h, &self.wm, &self.wc, &self.r);
-        let mut pxz = na::SMatrix::<f64, 4, 2>::zeros();
+        let mut pxz = na::SMatrix::<f64, 4, 3>::zeros();
         for i in 0..9 {
             pxz += self.wc[i]
                 * (self.sigma_f.column(i) - self.x)

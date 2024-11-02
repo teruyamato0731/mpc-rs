@@ -43,11 +43,13 @@ fn main() {
     let ukf_mutex = init_ukf();
     let ukf_mutex2 = Arc::clone(&ukf_mutex);
 
+    let start = Instant::now();
+
     thread::spawn(move || {
         // データが読み込まれるまで待機
         loop {
             if let Some(s) = read(&mut reader) {
-                let x_obs = vector![s.encoder as f64, s.gyro as f64];
+                let x_obs = s.into();
                 let (x, p) = {
                     // ロックを取得できるまで待機
                     let mut ukf = ukf_mutex.lock().expect("Failed to lock");
@@ -55,8 +57,8 @@ fn main() {
                     (ukf.state(), ukf.covariance())
                 };
                 print!(
-                    "\x1b[32mReceived:\x1b[0m {:6.3} {:6.3}, ",
-                    s.encoder, s.gyro
+                    "\x1b[32mReceived:\x1b[0m {:6.3}, {:6.3}, {:6.3}, ",
+                    x_obs[0], x_obs[1], x_obs[2]
                 );
                 print!(
                     "est: [{:6.3}, {:6.3}, {:6.3}, {:6.3}] ",
@@ -149,8 +151,9 @@ fn dynamics(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
     r
 }
 // 観測関数
-fn hx(state: &na::Vector4<f64>) -> na::Vector2<f64> {
+fn hx(state: &na::Vector4<f64>) -> na::Vector3<f64> {
     vector![
+        60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         state[3].to_radians(),              // 角速度 [rad/s] -> [deg/s]
     ]
@@ -180,12 +183,13 @@ fn init_ukf() -> Arc<Mutex<UnscentedKalmanFilter>> {
     let q = matrix![
         0.0, 0.0, 0.0, 0.0;
         0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.05;
-        0.0, 0.0, 0.05, 5.0;
+        0.0, 0.0, 0.0, 0.01;
+        0.0, 0.0, 0.01, 1.0;
     ];
     let r = matrix![
-        200.0, 0.0;
-        0.0, 10.0;
+        2000.0, 0.0, 0.0;
+        0.0, 2000.0, 0.0;
+        0.0, 0.0, 100.0;
     ];
     let x = vector![0.0, 0.0, 0.0, 0.0];
     let obj = UnscentedKalmanFilter::new(x, p, q, r);

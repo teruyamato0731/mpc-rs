@@ -224,22 +224,28 @@ fn init_ukf(init: &na::Vector4<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
         0.0, 10.0e-4, 10.0e-2, 10.0;
     ];
     let r = matrix![
-        50.0, 0.0;
-        0.0, 3.0;
+        50.0, 0.0, 0.0;
+        0.0, 50.0, 0.0;
+        0.0, 0.0, 3.0;
     ];
     let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
 
-fn sensor(x: &na::Vector4<f64>) -> na::Vector2<f64> {
+fn sensor(x: &na::Vector4<f64>) -> na::Vector3<f64> {
     let mut rng = rand::thread_rng();
     let dist = rand_distr::Normal::<f64>::new(0.0, 1.0).unwrap();
-    let noise = na::Vector2::new(50.0 * dist.sample(&mut rng), 0.5 * dist.sample(&mut rng));
+    let noise = na::Vector3::new(
+        50.0 * dist.sample(&mut rng),
+        50.0 * dist.sample(&mut rng),
+        0.5 * dist.sample(&mut rng),
+    );
     hx(x) + noise
 }
 
-fn hx(state: &na::Vector4<f64>) -> na::Vector2<f64> {
-    na::Vector2::new(
+fn hx(state: &na::Vector4<f64>) -> na::Vector3<f64> {
+    na::Vector3::new(
+        60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         state[3].to_degrees(),              // 角速度 [rad/s] -> [deg/s]
     )
