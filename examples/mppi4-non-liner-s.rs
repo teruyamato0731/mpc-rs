@@ -57,7 +57,7 @@ fn main() {
                 *x = dynamics_short(&x, u_n[0], pre.elapsed().as_secs_f64());
             }
             pre = std::time::Instant::now();
-            // thread::sleep(Duration::from_millis(1));
+            thread::sleep(Duration::from_millis(1));
         }
     });
 
@@ -73,7 +73,7 @@ fn main() {
             };
             let x_obs = sensor(&x);
             // センサの遅延
-            thread::sleep(Duration::from_millis(5));
+            thread::sleep(Duration::from_millis(1));
             let u_n = {
                 let u_n = u_n_mutex3.lock().unwrap();
                 *u_n
@@ -91,6 +91,10 @@ fn main() {
             print!("\x1b[36mRcv: \x1b[m");
             print!("t: {:.2} ", start.elapsed().as_secs_f64());
             print!(
+                "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                x[0], x[1], x[2], x[3]
+            );
+            print!(
                 "est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
                 x_est[0], x_est[1], x_est[2], x_est[3]
             );
@@ -101,33 +105,34 @@ fn main() {
                 p[(2, 2)],
                 p[(3, 3)]
             );
-            print!(
-                "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-                x[0], x[1], x[2], x[3]
-            );
             println!();
             // 次の送信まで待機
-            thread::sleep(Duration::from_millis(5));
+            thread::sleep(Duration::from_millis(2));
         }
     });
 
     let start = std::time::Instant::now();
-    while start.elapsed().as_secs_f64() < 10.0 {
-        let (x_est, p) = {
+    loop {
+        let x_est = {
             // ロックを取得できるまで待機
             let ukf = ukf_mutex2.lock().expect("Failed to lock");
-            (ukf.state(), ukf.covariance())
+            ukf.state()
         };
+
+        // x[2] が 60度 以上になったら終了
+        if x_est[2].abs() > 60.0f64.to_radians() {
+            println!("x[2] is over 60 degrees");
+            break;
+        }
+
         let u_n = {
             let u_n = u_n_mutex.lock().unwrap();
             *u_n
         };
-        let u_n = match mppi.compute(&x_est, &u_n) {
+        let result = mppi.compute(&x_est, &u_n);
+        let u_n = match result {
             Ok(u) => u,
-            Err(e) => {
-                println!("\x1b[31mFailed to compute MPPI: {:?}\x1b[m", e);
-                na::SVector::<f64, N>::zeros()
-            }
+            _ => na::SVector::<f64, N>::zeros(),
         };
         {
             let mut tmp = u_n_mutex.lock().unwrap();
@@ -140,14 +145,12 @@ fn main() {
             "est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
             x_est[0], x_est[1], x_est[2], x_est[3]
         );
-        print!(
-            "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-            p[(0, 0)],
-            p[(1, 1)],
-            p[(2, 2)],
-            p[(3, 3)]
-        );
         print!("u: {:8.3} ", u_n[0]);
+
+        if let Err(e) = result {
+            print!("\x1b[31mFailed to compute MPPI: {:?}\x1b[m", e);
+        }
+
         println!();
 
         wtr.write_record(&[
@@ -160,14 +163,7 @@ fn main() {
         ])
         .expect("write error");
         wtr.flush().expect("flush error");
-
-        // x[2] が 60度 以上になったら終了
-        if x_est[2].abs() > 60.0f64.to_radians() {
-            println!("x[2] is over 60 degrees");
-            break;
-        }
     }
-    println!("elapsed: {:.2} sec", start.elapsed().as_secs_f64());
 }
 
 // 系ダイナミクスを記述
@@ -212,21 +208,21 @@ fn dynamics_short(x: &na::Vector4<f64>, u: f64, dt: f64) -> na::Vector4<f64> {
 
 fn init_ukf(init: &na::Vector4<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = matrix![
-        15.0, 0.0, 0.0, 0.0;
-        0.0, 15.0, 0.0, 0.0;
-        0.0, 0.0, 15.0, 0.0;
-        0.0, 0.0, 0.0, 15.0;
+        1.0, 0.0, 0.0, 0.0;
+        0.0, 1.0, 0.0, 0.0;
+        0.0, 0.0, 1.0, 0.0;
+        0.0, 0.0, 0.0, 1.0;
     ];
     let q = matrix![
         0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 10.0e-4;
-        0.0, 0.0, 10.0e-4, 10.0e-2;
-        0.0, 10.0e-4, 10.0e-2, 10.0;
+        0.0, 0.0, 0.0, 1.0;
+        0.0, 0.0, 1.0, 1e2;
+        0.0, 1.0, 1e2, 1e4;
     ];
     let r = matrix![
         50.0, 0.0, 0.0;
         0.0, 50.0, 0.0;
-        0.0, 0.0, 3.0;
+        0.0, 0.0, 0.5;
     ];
     let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))

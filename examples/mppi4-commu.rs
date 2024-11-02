@@ -35,7 +35,6 @@ fn main() {
         .expect("Failed to open port");
     let mut reader = BufReader::new(port.try_clone().unwrap());
 
-    let mut x = na::Vector4::new(0.5, 0.0, 0.1, 0.0);
     let mut u_n = na::SVector::<f64, N>::zeros();
 
     let mut mppi = Mppi::<N, K>::new(dynamics, cost, LAMBDA, R, LIMIT);
@@ -50,25 +49,31 @@ fn main() {
         }
     });
 
-    let mut pre = std::time::Instant::now();
     loop {
         // データが読み込まれるまで待機
         if let Ok(received) = rx.try_recv() {
-            println!("{:?}", received);
-            x = received.into();
+            print!(
+                "{:6.3} {:6.3} {:6.3} {:6.3} ",
+                received.x, received.dx, received.theta, received.dtheta
+            );
+            let x: na::Vector4<f64> = received.into();
+
             // θ が 60度 以上になったら終了
             if x[2] > 60.0f64.to_radians() {
                 println!("x[2] is over 60 degrees");
                 break;
             }
-        }
 
-        // 0.1sごとに制御信号を送信
-        if pre.elapsed() >= Duration::from_millis(100) {
-            u_n = mppi.compute(&x, &u_n).unwrap();
+            // データが来たら制御信号を送信
+            if let Ok(u) = mppi.compute(&x, &u_n) {
+                u_n = u;
+            } else {
+                u_n = na::SVector::<f64, N>::zeros();
+                print!("Failed to compute ");
+            }
+            println!("{:6.3}", u_n[0]);
             let c = Control::from_current(u_n[0]);
             write(&mut port, &c);
-            pre = std::time::Instant::now();
         }
     }
 }

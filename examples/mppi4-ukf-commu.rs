@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // 予測ホライゾン
 const T: f64 = 0.8;
@@ -15,9 +15,9 @@ const N: usize = 8;
 const DT: f64 = T / N as f64;
 
 // 制御ホライゾン
-const K: usize = 8e5 as usize;
+const K: usize = 15e5 as usize;
 const LAMBDA: f64 = 0.5;
-const R: f64 = 3.0;
+const R: f64 = 5.0;
 
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
@@ -56,6 +56,7 @@ fn main() {
                     ukf.update(&x_obs, hx);
                     (ukf.state(), ukf.covariance())
                 };
+                print!("{:6}, ", start.elapsed().as_millis());
                 print!(
                     "\x1b[32mReceived:\x1b[0m {:6.3}, {:6.3}, {:6.3}, ",
                     x_obs[0], x_obs[1], x_obs[2]
@@ -78,7 +79,7 @@ fn main() {
     let mut pre = std::time::Instant::now();
     loop {
         // データが読み込まれるまで待機
-        if pre.elapsed() > Duration::from_millis(10) {
+        if pre.elapsed() > Duration::from_secs_f64(DT) {
             pre = std::time::Instant::now();
 
             let x = {
@@ -99,9 +100,11 @@ fn main() {
 
             if let Ok(u) = mppi.compute(&x, &u_n) {
                 u_n = u;
+                print!("{:6}, ", start.elapsed().as_millis());
                 print!("\x1b[33mControl:\x1b[0m {:6.3} ", u_n[0]);
             } else {
                 u_n = na::SVector::<f64, N>::zeros();
+                print!("{:6}, ", start.elapsed().as_millis());
                 print!("\x1b[31mControl:\x1b[0m {:6.3} ", u_n[0]);
             }
             let u = 1000.0 * u_n[0];
