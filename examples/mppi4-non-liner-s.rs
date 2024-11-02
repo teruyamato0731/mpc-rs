@@ -19,7 +19,7 @@ const LAMBDA: f64 = 0.5;
 const R: f64 = 10.0;
 
 // 制約
-const LIMIT: (f64, f64) = (-20.0, 20.0);
+const LIMIT: (f64, f64) = (-10.0, 10.0);
 
 fn cost(x: &na::Vector4<f64>) -> f64 {
     let x_clamped = x[0].clamp(-2.0, 2.0);
