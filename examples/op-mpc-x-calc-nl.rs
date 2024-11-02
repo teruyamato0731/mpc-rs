@@ -111,6 +111,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut x = vector![0.5, 0.0, 0.1, 0.0];
 
+    let start = std::time::Instant::now();
     const MAX_ITERS: usize = (5.0 / DT) as usize;
     for i in 0..MAX_ITERS + 1 {
         let f = |u: &[f64], c: &mut f64| -> Result<(), SolverError> {
@@ -179,6 +180,8 @@ fn main() -> anyhow::Result<()> {
             break;
         }
     }
+
+    println!("Elapsed: {:.2} sec", start.elapsed().as_secs_f64());
 
     Ok(())
 }
