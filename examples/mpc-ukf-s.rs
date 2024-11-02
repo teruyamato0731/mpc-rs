@@ -111,13 +111,13 @@ fn main() {
         }
 
         let f = |u: &[f64], c: &mut f64| -> Result<(), SolverError> {
-            let u = na::SVector::<f64, N>::from_iterator(u.iter().copied());
+            let u = na::SVectorView::<f64, N>::from_slice(u);
             *c = cost(&x_est, &u);
             Ok(())
         };
 
         let df = |u: &[f64], grad: &mut [f64]| -> Result<(), SolverError> {
-            let u = na::SVector::<f64, N>::from_iterator(u.iter().copied());
+            let u = na::SVectorView::<f64, N>::from_slice(u);
             let g = grad_cost(&x_est, &u);
             grad.copy_from_slice(g.as_slice());
             Ok(())
@@ -230,25 +230,31 @@ fn dynamics_short(x: &na::Vector4<f64>, u: f64, dt: f64) -> na::Vector4<f64> {
     r
 }
 
-fn cost(x: &na::Vector4<f64>, u: &na::SVector<f64, N>) -> f64 {
+fn cost<S>(x: &na::Vector4<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> f64
+where
+    S: na::Storage<f64, na::Const<N>>,
+{
     let a: na::SMatrix<f64, { 4 * N }, 4> = create_a_matrix!(A, N);
     let g: na::SMatrix<f64, { 4 * N }, N> = create_g_matrix!(A, B, N);
     let q = create_q_matrix!(C, N);
 
     let x_ref = gen_ref(x);
-    let x_ref: na::SVector<f64, { 4 * N }> = na::SVector::from_iterator(x_ref.iter().copied());
+    let x_ref = na::SVectorView::<f64, { 4 * N }>::from_slice(x_ref.as_slice());
     let left = u.transpose() * g.transpose() * q * g * u;
     let right = 2.0 * (x.transpose() * a.transpose() - x_ref.transpose()) * q * g * u;
     left[0] + right[0]
 }
 
-fn grad_cost(x: &na::Vector4<f64>, u: &na::SVector<f64, N>) -> na::SVector<f64, N> {
+fn grad_cost<S>(x: &na::Vector4<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> na::SVector<f64, N>
+where
+    S: na::Storage<f64, na::Const<N>>,
+{
     let a: na::SMatrix<f64, { 4 * N }, 4> = create_a_matrix!(A, N);
     let g: na::SMatrix<f64, { 4 * N }, N> = create_g_matrix!(A, B, N);
     let q = create_q_matrix!(C, N);
 
     let x_ref = gen_ref(x);
-    let x_ref = na::SVector::from_iterator(x_ref.iter().copied());
+    let x_ref = na::SVectorView::<f64, { 4 * N }>::from_slice(x_ref.as_slice());
     2.0 * g.transpose() * q * (g * u + a * x - x_ref)
 }
 
