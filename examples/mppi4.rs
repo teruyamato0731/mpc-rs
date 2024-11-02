@@ -78,10 +78,10 @@ const J1: f64 = M1 * R_W * R_W;
 const J2: f64 = 0.2;
 const G: f64 = 9.81;
 const KT: f64 = 0.15; // m2006
-const D: f64 = (M1 + M2 + J1 / R_W * R_W) * (M2 * L * L + J2) - M2 * M2 * L * L;
+const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2) - M2 * M2 * L * L;
 fn dynamics(state: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
     let mut x = *state;
-    x[3] += ((M1 + M2 + J1 / R_W * R_W) / D * M2 * G * L * x[2] - M2 * L / D / R_W * KT * u) * DT;
+    x[3] += ((M1 + M2 + J1 / (R_W * R_W)) / D * M2 * G * L * x[2] - M2 * L / D / R_W * KT * u) * DT;
     x[2] += x[3] * DT;
     x[1] += (-M2 * M2 * G * L * L / D * x[2] + (M2 * L * L + J2) / D / R_W * KT * u) * DT;
     x[0] += x[1] * DT;

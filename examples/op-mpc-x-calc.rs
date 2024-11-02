@@ -11,7 +11,7 @@ const A: na::Matrix4<f64> = matrix![
     1.0, DT, 0.0, 0.0;
     0.0, 1.0, -M2 * M2 * G * L * L / D * DT, 0.0;
     0.0, 0.0, 1.0, DT;
-    0.0, 0.0, (M1 + M2 + J1 / R * R) / D * M2 * G * L * DT, 1.0
+    0.0, 0.0, (M1 + M2 + J1 / (R * R)) / D * M2 * G * L * DT, 1.0
 ];
 const B: na::Vector4<f64> = matrix![
     0.0;
@@ -191,7 +191,7 @@ const J1: f64 = M1 * R * R;
 const J2: f64 = 0.2;
 const G: f64 = 9.81;
 const KT: f64 = 0.15; // m2006
-const D: f64 = (M1 + M2 + J1 / R * R) * (M2 * L * L + J2) - M2 * M2 * L * L;
+const D: f64 = (M1 + M2 + J1 / (R * R)) * (M2 * L * L + J2) - M2 * M2 * L * L;
 // 逐次実行版
 fn dynamics(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
     A * x + B * u

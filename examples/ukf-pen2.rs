@@ -30,9 +30,9 @@ const R: na::Matrix3<f64> = matrix![
 // 系ダイナミクスを記述
 fn fx(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
     let mut r = *x;
-    const D: f64 = (M1 + M2 + J1 / R_W * R_W) * (M2 * L * L + J2);
+    const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2);
     let d = D - M2 * M2 * L * L * x[2].cos() * x[2].cos();
-    let term1 = (M1 + M2 + J1 / R_W * R_W) * M2 * G * L * x[2].sin();
+    let term1 = (M1 + M2 + J1 / (R_W * R_W)) * M2 * G * L * x[2].sin();
     let term2 = (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin()) * M2 * L * x[2].cos();
     r[3] += (term1 - term2) / d * DT;
     r[2] += x[3] * DT;

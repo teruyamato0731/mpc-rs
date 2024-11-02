@@ -44,7 +44,7 @@ const J2: f64 = 0.2;
 
 const G: f64 = 9.81;
 const KT: f64 = 0.15; // m2006
-const D: f64 = (M1 + M2 + J1 / R * R) * (M2 * L * L + J2) - M2 * M2 * L * L;
+const D: f64 = (M1 + M2 + J1 / (R * R)) * (M2 * L * L + J2) - M2 * M2 * L * L;
 
 const T: f64 = 0.5;
 const N: usize = 50;
@@ -62,7 +62,7 @@ const DT: f64 = T / N as f64;
 
 // 逐次実行版
 fn dynamics(x: &mut [f64; 4], u: f64) {
-    x[3] += ((M1 + M2 + J1 / R * R) / D * M2 * G * L * x[2] - M2 * L / D / R * KT * u) * DT;
+    x[3] += ((M1 + M2 + J1 / (R * R)) / D * M2 * G * L * x[2] - M2 * L / D / R * KT * u) * DT;
     x[2] += x[3] * DT;
     x[1] += (-M2 * M2 * G * L * L / D * x[2] + (M2 * L * L + J2) / D / R * KT * u) * DT;
     x[0] += x[1] * DT;
