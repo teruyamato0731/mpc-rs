@@ -1,6 +1,6 @@
 extern crate nalgebra as na;
-use mpc::packet::{Control, Sensor};
-use mpc::ukf::UnscentedKalmanFilter;
+use mpc::packet::{Control, Sensor2 as Sensor};
+use mpc::ukf2::UnscentedKalmanFilter;
 use na::{matrix, vector};
 use optimization_engine::{panoc::*, *};
 use std::f64::consts::PI;
@@ -31,7 +31,7 @@ fn main() {
     let u_n_mutex = Arc::new(Mutex::new(init_u_n));
     let u_n_mutex1 = u_n_mutex.clone();
     let u_n_mutex2 = u_n_mutex.clone();
-    let init_x = vector![0.0, 0.0, 0.0, 0.0];
+    let init_x = vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let ukf_mutex = init_ukf(&init_x);
     let ukf_mutex1 = ukf_mutex.clone();
 
@@ -51,7 +51,7 @@ fn main() {
                     let mut ukf = ukf_mutex.lock().expect("Failed to lock");
                     let dt = pre.elapsed().as_secs_f64();
                     pre = std::time::Instant::now();
-                    let fx = |x: &na::Vector4<f64>, u: f64| dynamics_short(x, u, dt);
+                    let fx = |x: &_, u| dynamics_short(x, u, dt);
                     ukf.predict(u, fx);
                     ukf.update(&x_obs, hx);
                     (ukf.state(), ukf.covariance())
@@ -60,18 +60,18 @@ fn main() {
                 print!("t: {:5.2} ", start.elapsed().as_secs_f64());
                 print!(
                     "est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-                    x_est[0], x_est[1], x_est[2], x_est[3]
+                    x_est[0], x_est[1], x_est[3], x_est[4]
                 );
                 print!(
                     "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
                     p[(0, 0)],
                     p[(1, 1)],
-                    p[(2, 2)],
-                    p[(3, 3)]
+                    p[(3, 3)],
+                    p[(4, 4)]
                 );
                 print!(
-                    "obs: [{:6.2}, {:5.2}, {:5.2}] ",
-                    x_obs[0], x_obs[1], x_obs[2]
+                    "obs: [{:6.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                    x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
                 );
                 print!("u: {:8.3} ", u);
                 println!();
@@ -135,7 +135,7 @@ fn main() {
         print!("t: {:5.2} ", start.elapsed().as_secs_f64());
         print!(
             "est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-            x_est[0], x_est[1], x_est[2], x_est[3]
+            x_est[0], x_est[1], x_est[3], x_est[4]
         );
         print!("u: {:8.3} ", u[0]);
         println!();
@@ -204,22 +204,24 @@ const G: f64 = 9.81;
 const KT: f64 = 0.15; // m2006
 const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2) - M2 * M2 * L * L;
 // 非線形
-fn dynamics_short(x: &na::Vector4<f64>, u: f64, dt: f64) -> na::Vector4<f64> {
+fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let mut r = *x;
     const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2);
-    let d = D - M2 * M2 * L * L * x[2].cos() * x[2].cos();
-    let term1 = (M1 + M2 + J1 / (R_W * R_W)) * M2 * G * L * x[2].sin();
-    let term2 = (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin()) * M2 * L * x[2].cos();
-    r[3] += (term1 - term2) / d * dt;
-    r[2] += x[3] * dt;
-    let term3 = (J2 + M2 * L * L) * (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin());
-    let term4 = M2 * G * L * L * x[2].sin() * x[2].cos();
-    r[1] += (term3 + term4) / d * dt;
+    let d = D - M2 * M2 * L * L * x[3].cos() * x[3].cos();
+    let term1 = (M1 + M2 + J1 / (R_W * R_W)) * M2 * G * L * x[3].sin();
+    let term2 = (KT * u / R_W + M2 * L * x[4].powi(2) * x[3].sin()) * M2 * L * x[3].cos();
+    r[5] = (term1 - term2) / d;
+    r[4] += x[5] * dt;
+    r[3] += x[4] * dt;
+    let term3 = (J2 + M2 * L * L) * (KT * u / R_W + M2 * L * x[4].powi(2) * x[3].sin());
+    let term4 = M2 * G * L * L * x[3].sin() * x[3].cos();
+    r[2] = (term3 + term4) / d;
+    r[1] += x[2] * dt;
     r[0] += x[1] * dt;
     r
 }
 
-fn cost<S>(x: &na::Vector4<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> f64
+fn cost<S>(x: &na::Vector6<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> f64
 where
     S: na::Storage<f64, na::Const<N>>,
 {
@@ -227,14 +229,15 @@ where
     let g: na::SMatrix<f64, { 4 * N }, N> = create_g_matrix!(A, B, N);
     let q = create_q_matrix!(C, N);
 
-    let x_ref = gen_ref(x);
+    let x = vector![x[0], x[1], x[3], x[4]];
+    let x_ref = gen_ref(&x);
     let x_ref = na::SVectorView::<f64, { 4 * N }>::from_slice(x_ref.as_slice());
     let left = u.transpose() * g.transpose() * q * g * u;
     let right = 2.0 * (x.transpose() * a.transpose() - x_ref.transpose()) * q * g * u;
     left[0] + right[0]
 }
 
-fn grad_cost<S>(x: &na::Vector4<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> na::SVector<f64, N>
+fn grad_cost<S>(x: &na::Vector6<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> na::SVector<f64, N>
 where
     S: na::Storage<f64, na::Const<N>>,
 {
@@ -242,7 +245,8 @@ where
     let g: na::SMatrix<f64, { 4 * N }, N> = create_g_matrix!(A, B, N);
     let q = create_q_matrix!(C, N);
 
-    let x_ref = gen_ref(x);
+    let x = vector![x[0], x[1], x[3], x[4]];
+    let x_ref = gen_ref(&x);
     let x_ref = na::SVectorView::<f64, { 4 * N }>::from_slice(x_ref.as_slice());
     2.0 * g.transpose() * q * (g * u + a * x - x_ref)
 }
@@ -259,34 +263,44 @@ fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
     r
 }
 
-fn init_ukf(init: &na::Vector4<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
+fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = matrix![
-        1.0, 0.0, 0.0, 0.0;
-        0.0, 1.0, 0.0, 0.0;
-        0.0, 0.0, 1.0, 0.0;
-        0.0, 0.0, 0.0, 1.0;
+        10.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 10.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 10.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 10.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 10.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.0, 10.0;
     ];
     let q = matrix![
-        0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 1.0;
-        0.0, 0.0, 1.0, 1e2;
-        0.0, 1.0, 1e2, 1e4;
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
+        0.0, 0.0, 0.0, 0.0, 1.0, 1e2;
+        0.0, 0.0, 0.0, 1.0, 1e2, 1e4;
     ];
     let r = matrix![
-        50.0, 0.0, 0.0;
-        0.0, 50.0, 0.0;
-        0.0, 0.0, 0.5;
+        50.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 50.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.5, 0.0, 0.0;
+        0.0, 0.0, 0.0, 50.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 50.0;
     ];
     let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
 
-fn hx(state: &na::Vector4<f64>) -> na::Vector3<f64> {
-    na::Vector3::new(
+fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
+    let v = M2 * G * state[3].cos() + M2 * state[2] * state[3].sin() - M2 * L * state[4].powi(2);
+    let h = -M2 * G * state[3].sin() + M2 * state[2] * state[3].cos() + M2 * L * state[5];
+    vector![
         60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
-        state[3].to_degrees(),              // 角速度 [rad/s] -> [deg/s]
-    )
+        state[4].to_degrees(),              // 角速度 [rad/s] -> [deg/s]
+        v / G,                              // 垂直方向の力 [N] -> [G]
+        h / G,                              // 水平方向の力 [N] -> [G]
+    ]
 }
 
 fn write(port: &mut Box<dyn serialport::SerialPort>, c: &Control) {
