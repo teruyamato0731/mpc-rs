@@ -60,8 +60,11 @@ fn main() {
                 print!("\x1b[36mRcv: \x1b[m");
                 print!("t: {:5.2} ", start.elapsed().as_secs_f64());
                 print!(
-                    "est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-                    x_est[0], x_est[1], x_est[3], x_est[4]
+                    "est: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
+                    x_est[0],
+                    x_est[1],
+                    x_est[3].to_degrees(),
+                    x_est[4].to_degrees()
                 );
                 print!(
                     "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
@@ -71,7 +74,7 @@ fn main() {
                     p[(4, 4)]
                 );
                 print!(
-                    "obs: [{:6.0}, {:6.0}, {:5.2}, {:5.2}, {:5.2}] ",
+                    "obs: [{:6.0}, {:6.0}, {:4.0}, {:5.2}, {:5.2}] ",
                     x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
                 );
                 print!("u: {:8.3} ", u);
@@ -140,8 +143,11 @@ fn main() {
         print!("\x1b[32mCon: \x1b[m");
         print!("t: {:5.2} ", start.elapsed().as_secs_f64());
         print!(
-            "est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-            x_est[0], x_est[1], x_est[3], x_est[4]
+            "est: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
+            x_est[0],
+            x_est[1],
+            x_est[3].to_degrees(),
+            x_est[4].to_degrees()
         );
         print!("u: {:8.3} ", u[0]);
         println!();
