@@ -14,6 +14,7 @@ const T: f64 = 0.8;
 const N: usize = 16;
 const DT: f64 = T / N as f64;
 
+// MARK: - Main
 fn main() {
     let mut port = serialport::new("/dev/ttyUSB0", 115_200)
         .timeout(Duration::from_millis(10))
@@ -70,7 +71,7 @@ fn main() {
                     p[(4, 4)]
                 );
                 print!(
-                    "obs: [{:6.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                    "obs: [{:6.0}, {:6.0}, {:5.2}, {:5.2}, {:5.2}] ",
                     x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
                 );
                 print!("u: {:8.3} ", u);
@@ -90,6 +91,11 @@ fn main() {
         // θの絶対値がpi/2を超えればエラー
         if x_est[3].abs() > std::f64::consts::PI / 2.0 {
             println!("x[2] is over pi/2");
+            println!(
+                "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                x_est[0], x_est[1], x_est[2], x_est[3], x_est[4], x_est[5]
+            );
+            println!("elapsed: {:.2} sec", start.elapsed().as_secs_f64());
             break;
         }
 
@@ -142,6 +148,7 @@ fn main() {
     }
 }
 
+// MARK: - MPC
 macro_rules! create_a_matrix {
     ($a:expr, $n:expr) => {{
         let mut a = na::SMatrix::<f64, { 4 * $n }, 4>::zeros();
@@ -263,6 +270,7 @@ fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
     r
 }
 
+// MARK: - UKF
 fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = matrix![
         10.0, 0.0, 0.0, 0.0, 0.0, 0.0;
@@ -290,7 +298,6 @@ fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
-
 fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
     let ax = G * state[3].sin() + state[2] * state[3].cos() + L * state[5];
     let az = G * state[3].cos() - state[2] * state[3].sin() + L * state[4].powi(2);
@@ -303,11 +310,11 @@ fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
     ]
 }
 
+// MARK: - UART
 fn write(port: &mut Box<dyn serialport::SerialPort>, c: &Control) {
     let cobs = c.as_cobs();
     port.write_all(&cobs).expect("Write failed!");
 }
-// UARTを受取り、mpscに送信する
 fn read(reader: &mut BufReader<Box<dyn serialport::SerialPort>>) -> Option<Sensor> {
     let mut buf = Vec::new();
     let len = reader.read_until(0x00, &mut buf).ok()?;
