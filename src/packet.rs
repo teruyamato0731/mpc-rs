@@ -57,9 +57,9 @@ impl_cobs_convertible!(Sensor);
 impl_cobs_convertible!(Sensor2);
 
 impl Control {
-    pub const MAX: i16 = 16000;
+    pub const MAX: i16 = 10000;
     pub fn from_current(current: f64) -> Self {
-        const K: f64 = Control::MAX as f64 / 20.0;
+        const K: f64 = Control::MAX as f64 / 10.0;
         let u = (K * current) as i16;
         Control { u }
     }
