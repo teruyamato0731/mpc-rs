@@ -127,8 +127,11 @@ fn main() {
             .with_max_duration(max_dur);
         let _status = panoc.solve(u.as_mut_slice()).expect("Failed to solve");
 
-        if pre.elapsed().as_secs_f64() < DT {
-            thread::sleep(Duration::from_secs_f64(DT - pre.elapsed().as_secs_f64()));
+        // wait秒は待機させる
+        const WAIT: std::time::Duration = Duration::from_millis(5);
+        let elapsed = pre.elapsed();
+        if elapsed < WAIT {
+            thread::sleep(WAIT - elapsed);
         }
         pre = std::time::Instant::now();
 
