@@ -323,11 +323,11 @@ fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
     let ax = G * state[3].sin() + state[2] * state[3].cos() + L * state[5];
     let az = G * state[3].cos() - state[2] * state[3].sin() + L * state[4].powi(2);
     vector![
-        60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
-        -60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
-        state[4].to_degrees(),              // 角速度 [rad/s] -> [deg/s]
-        az / G,                             // 垂直方向の力 [m/s^2] -> [G]
-        ax / G,                             // 水平方向の力 [m/s^2] -> [G]
+        36.0 * 60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
+        36.0 * -60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
+        state[4].to_degrees(),                     // 角速度 [rad/s] -> [deg/s]
+        az / G,                                    // 垂直方向の力 [m/s^2] -> [G]
+        ax / G,                                    // 水平方向の力 [m/s^2] -> [G]
     ]
 }
 
