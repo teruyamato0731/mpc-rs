@@ -192,9 +192,9 @@ macro_rules! create_q_matrix {
 
 const A: na::Matrix4<f64> = matrix![
     1.0, DT, 0.0, 0.0;
-    0.0, 1.0, -M2 * M2 * G * L * L / D * DT, 0.0;
+    0.0, 1.0, -M2 * M2 * G * L * L / (2.0 * D) * DT, 0.0;
     0.0, 0.0, 1.0, DT;
-    0.0, 0.0, (M1 + M2 + J1 / (R_W * R_W)) / D * M2 * G * L * DT, 1.0
+    0.0, 0.0, (M1 + 0.5 * M2 + J1 / (R_W * R_W)) / D * M2 * G * L * DT, 1.0
 ];
 const B: na::Vector4<f64> = matrix![
     0.0;
@@ -217,22 +217,22 @@ const L: f64 = 0.4; // 重心までの距離
 const J1: f64 = 2.23e5 * 1e-9; // タイヤの慣性モーメント
 const J2: f64 = 1.2; // リポあり
 const G: f64 = 9.81;
-const KT: f64 = 0.3; // m2006 * 2
-const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2) - M2 * M2 * L * L;
+const KT: f64 = 0.15; // m2006 * 2
+const D: f64 = (M1 + 0.5 * M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2) - 0.5 * M2 * M2 * L * L;
 // 非線形
 fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let mut r = *x;
     const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2);
-    let d = D - (M2 * L * x[2].cos()).powi(2);
+    let d = D - 0.5 * (M2 * L * x[2].cos()).powi(2);
     r[0] += x[1] * dt;
     r[1] += x[2] * dt;
     let term3 = (J2 + M2 * L * L) * (KT * u / R_W + M2 * L * x[4].powi(2) * x[3].sin());
-    let term4 = M2 * G * L * L * x[3].sin() * x[3].cos();
+    let term4 = 0.5 * M2 * G * L * L * x[3].sin() * x[3].cos();
     r[2] = (term3 + term4) / d;
     r[3] += x[4] * dt;
     r[4] += x[5] * dt;
-    let term1 = (M1 + M2 + J1 / (R_W * R_W)) * M2 * G * L * x[3].sin();
-    let term2 = (KT * u / R_W + M2 * L * x[4].powi(2) * x[3].sin()) * M2 * L * x[3].cos();
+    let term1 = (M1 + 0.5 * M2 + J1 / (R_W * R_W)) * M2 * G * L * x[3].sin();
+    let term2 = (KT * u / R_W + 0.5 * M2 * L * x[4].powi(2) * x[3].sin()) * M2 * L * x[3].cos();
     r[5] = (term1 - term2) / d;
     r
 }
