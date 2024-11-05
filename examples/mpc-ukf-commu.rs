@@ -1,5 +1,5 @@
 extern crate nalgebra as na;
-use mpc::packet::{Control, Sensor2 as Sensor};
+use mpc::packet::{Control, Sensor3 as Sensor};
 use mpc::ukf2::UnscentedKalmanFilter;
 use na::{matrix, vector};
 use optimization_engine::{panoc::*, *};
@@ -42,7 +42,7 @@ fn main() {
         let mut pre = start;
         loop {
             if let Some(s) = read(&mut reader) {
-                let x_obs = s.into();
+                let (enable, x_obs) = Sensor::parse(s);
                 let u = {
                     let u_n = u_n_mutex1.lock().unwrap();
                     u_n[0]
@@ -54,6 +54,17 @@ fn main() {
                     pre = std::time::Instant::now();
                     let fx = |x: &_, u| dynamics_short(x, u, dt);
                     ukf.predict(u, fx);
+                    let hx = |state: &_| {
+                        // enable bit が 0 なら 0 にする
+                        let mut obs = hx(state);
+
+                        for i in 0..5 {
+                            if (enable & (1 << i)) == 0 {
+                                obs[i] = 0.0;
+                            }
+                        }
+                        obs
+                    };
                     ukf.update(&x_obs, hx);
                     (ukf.state(), ukf.covariance())
                 };
@@ -66,6 +77,7 @@ fn main() {
                     x_est[3].to_degrees(),
                     x_est[4].to_degrees()
                 );
+                print!("en: {:05b} ", enable);
                 print!(
                     "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
                     p[(0, 0)],

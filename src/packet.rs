@@ -31,6 +31,15 @@ pub struct Sensor2 {
     pub accel: [f32; 2],   // 加速度センサ
 }
 
+#[derive(Debug, AsBytes, FromBytes, FromZeroes)]
+#[repr(packed)]
+pub struct Sensor3 {
+    pub enable: u8,
+    pub encoder: [i16; 2], // 駆動輪のオドメトリ
+    pub gyro: f32,         // ジャイロセンサの角速度
+    pub accel: [f32; 2],   // 加速度センサ
+}
+
 macro_rules! impl_cobs_convertible {
     ($type:ty) => {
         impl $type {
@@ -55,6 +64,7 @@ impl_cobs_convertible!(State);
 impl_cobs_convertible!(Control);
 impl_cobs_convertible!(Sensor);
 impl_cobs_convertible!(Sensor2);
+impl_cobs_convertible!(Sensor3);
 
 impl Control {
     pub const MAX: i16 = 10000;
@@ -86,5 +96,26 @@ impl From<Sensor2> for na::Vector5<f64> {
             s.accel[0] as f64,
             s.accel[1] as f64,
         )
+    }
+}
+
+impl Sensor3 {
+    pub fn parse(s: Sensor3) -> (u8, na::Vector5<f64>) {
+        let mut result = na::Vector5::new(
+            s.encoder[0] as f64,
+            s.encoder[1] as f64,
+            s.gyro as f64,
+            s.accel[0] as f64,
+            s.accel[1] as f64,
+        );
+
+        // s.enable の bit が 0 なら 0 にする
+        for i in 0..5 {
+            if (s.enable & (1 << i)) == 0 {
+                result[i] = 0.0;
+            }
+        }
+
+        (s.enable, result)
     }
 }
