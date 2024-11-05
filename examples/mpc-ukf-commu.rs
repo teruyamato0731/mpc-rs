@@ -87,8 +87,8 @@ fn main() {
             ukf.state()
         };
 
-        // x[2]の絶対値がpi/2を超えればエラー
-        if x_est[2].abs() > std::f64::consts::PI / 2.0 {
+        // θの絶対値がpi/2を超えればエラー
+        if x_est[3].abs() > std::f64::consts::PI / 2.0 {
             println!("x[2] is over pi/2");
             break;
         }
@@ -194,30 +194,30 @@ const C: na::Matrix4<f64> = matrix![
 ];
 
 // 系ダイナミクスを記述
-const M1: f64 = 150e-3;
+const M1: f64 = 160e-3;
 const R_W: f64 = 50e-3;
-const M2: f64 = 2.3 - 2.0 * M1 + 2.0;
-const L: f64 = 0.2474; // 重心までの距離
-const J1: f64 = M1 * R_W * R_W;
-const J2: f64 = 0.2;
+const M2: f64 = 2.16 - 2.0 * M1;
+const L: f64 = 0.4; // 重心までの距離
+const J1: f64 = 2.23e5 * 1e-9; // タイヤの慣性モーメント
+const J2: f64 = 1.2; // リポあり
 const G: f64 = 9.81;
-const KT: f64 = 0.15; // m2006
+const KT: f64 = 0.3; // m2006 * 2
 const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2) - M2 * M2 * L * L;
 // 非線形
 fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let mut r = *x;
     const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2);
-    let d = D - M2 * M2 * L * L * x[3].cos() * x[3].cos();
-    let term1 = (M1 + M2 + J1 / (R_W * R_W)) * M2 * G * L * x[3].sin();
-    let term2 = (KT * u / R_W + M2 * L * x[4].powi(2) * x[3].sin()) * M2 * L * x[3].cos();
-    r[5] = (term1 - term2) / d;
-    r[4] += x[5] * dt;
-    r[3] += x[4] * dt;
+    let d = D - (M2 * L * x[2].cos()).powi(2);
+    r[0] += x[1] * dt;
+    r[1] += x[2] * dt;
     let term3 = (J2 + M2 * L * L) * (KT * u / R_W + M2 * L * x[4].powi(2) * x[3].sin());
     let term4 = M2 * G * L * L * x[3].sin() * x[3].cos();
     r[2] = (term3 + term4) / d;
-    r[1] += x[2] * dt;
-    r[0] += x[1] * dt;
+    r[3] += x[4] * dt;
+    r[4] += x[5] * dt;
+    let term1 = (M1 + M2 + J1 / (R_W * R_W)) * M2 * G * L * x[3].sin();
+    let term2 = (KT * u / R_W + M2 * L * x[4].powi(2) * x[3].sin()) * M2 * L * x[3].cos();
+    r[5] = (term1 - term2) / d;
     r
 }
 
@@ -283,23 +283,23 @@ fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let r = matrix![
         50.0, 0.0, 0.0, 0.0, 0.0;
         0.0, 50.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.5, 0.0, 0.0;
-        0.0, 0.0, 0.0, 50.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 50.0;
+        0.0, 0.0, 5.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.2, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.2;
     ];
     let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
 
 fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
-    let v = M2 * G * state[3].cos() + M2 * state[2] * state[3].sin() - M2 * L * state[4].powi(2);
-    let h = -M2 * G * state[3].sin() + M2 * state[2] * state[3].cos() + M2 * L * state[5];
+    let ax = G * state[3].sin() + state[2] * state[3].cos() + L * state[5];
+    let az = G * state[3].cos() - state[2] * state[3].sin() + L * state[4].powi(2);
     vector![
         60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
-        60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
+        -60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         state[4].to_degrees(),              // 角速度 [rad/s] -> [deg/s]
-        v / G,                              // 垂直方向の力 [N] -> [G]
-        h / G,                              // 水平方向の力 [N] -> [G]
+        az / G,                             // 垂直方向の力 [m/s^2] -> [G]
+        ax / G,                             // 水平方向の力 [m/s^2] -> [G]
     ]
 }
 
