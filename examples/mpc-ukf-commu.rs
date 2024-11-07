@@ -293,14 +293,7 @@ fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
 
 // MARK: - UKF
 fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
-    let p = matrix![
-        10.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 10.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 10.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 10.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 10.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.0, 10.0;
-    ];
+    let p = na::SMatrix::<f64, 6, 6>::identity() * 10.0;
     let q = matrix![
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
@@ -309,13 +302,7 @@ fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
         0.0, 0.0, 0.0, 0.0, 1.0, 1e2;
         0.0, 0.0, 0.0, 1.0, 1e2, 1e4;
     ];
-    let r = matrix![
-        50.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 50.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 5.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.2, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.2;
-    ];
+    let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&vector![50.0, 50.0, 5.0, 0.2, 0.2]);
     let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
