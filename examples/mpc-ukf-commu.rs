@@ -59,16 +59,22 @@ fn main() {
             break;
         }
 
-        let mut u = {
+        let mut u_n = {
             let u = u_n_mutex.lock().unwrap();
             *u
         };
+        let pre_u = u_n[0];
 
-        let _status =
-            solve_control_optimization(&x_est, &mut u, &mut panoc_cache).expect("Failed to solve");
+        let _status = solve_control_optimization(&x_est, &mut u_n, &mut panoc_cache)
+            .expect("Failed to solve");
+
+        if approx_equal(pre_u, u_n[0]) {
+            // println!("u_n is not updated");
+            continue;
+        }
 
         // wait秒は待機させる
-        const WAIT: std::time::Duration = Duration::from_millis(5);
+        const WAIT: std::time::Duration = Duration::from_micros(2000);
         let elapsed = pre.elapsed();
         if elapsed < WAIT {
             thread::sleep(WAIT - elapsed);
@@ -77,10 +83,10 @@ fn main() {
 
         {
             let mut tmp = u_n_mutex.lock().unwrap();
-            *tmp = u;
+            *tmp = u_n;
         }
 
-        let c = Control::from_current(u[0]);
+        let c = Control::from_current(u_n[0]);
         write(&mut port, &c);
 
         print!("\x1b[32mCon: \x1b[m");
@@ -92,7 +98,7 @@ fn main() {
             x_est[2].to_degrees(),
             x_est[3].to_degrees()
         );
-        print!("u: {:8.3} ", u[0]);
+        print!("u: {:8.3} ", u_n[0]);
         println!();
     }
 }
@@ -337,6 +343,7 @@ fn start_ukf_thread(
                     x_est[3].to_degrees(),
                     x_est[4].to_degrees()
                 );
+                print!("u: {:8.3} ", u);
                 print!("en: {:05b} ", enable);
                 print!(
                     "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
@@ -349,9 +356,13 @@ fn start_ukf_thread(
                     "obs: [{:6.0}, {:6.0}, {:4.0}, {:5.2}, {:5.2}] ",
                     x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
                 );
-                print!("u: {:8.3} ", u);
                 println!();
             }
         }
     });
+}
+
+fn approx_equal(a: f64, b: f64) -> bool {
+    let epsilon = 1e-3;
+    (a - b).abs() < epsilon
 }
