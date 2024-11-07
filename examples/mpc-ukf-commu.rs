@@ -11,8 +11,11 @@ use std::time::Duration;
 
 // 予測ホライゾン
 const T: f64 = 0.8;
-const N: usize = 16;
+const N: usize = 8;
 const DT: f64 = T / N as f64;
+
+// 制約
+const LIMIT: (f64, f64) = (-10.0, 10.0);
 
 // MARK: - Main
 fn main() {
@@ -20,91 +23,30 @@ fn main() {
         .timeout(Duration::from_millis(10))
         .open()
         .expect("Failed to open port");
-    let mut reader = BufReader::new(port.try_clone().unwrap());
+    let reader = BufReader::new(port.try_clone().unwrap());
 
     let tolerance = 1e-6;
     let lbfgs_memory = 20;
-    let max_iters = usize::MAX;
-    let max_dur = std::time::Duration::from_secs_f64(DT);
     let mut panoc_cache = PANOCCache::new(N, tolerance, lbfgs_memory);
 
     let init_u_n = na::SVector::<f64, N>::zeros();
     let u_n_mutex = Arc::new(Mutex::new(init_u_n));
-    let u_n_mutex1 = u_n_mutex.clone();
-    let u_n_mutex2 = u_n_mutex.clone();
     let init_x = vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let ukf_mutex = init_ukf(&init_x);
-    let ukf_mutex1 = ukf_mutex.clone();
 
-    thread::spawn(move || {
-        // データが読み込まれるまで待機
-        let start = std::time::Instant::now();
-        let mut pre = start;
-        loop {
-            if let Some(s) = read(&mut reader) {
-                let (enable, x_obs) = Sensor::parse(s);
-                let u = {
-                    let u_n = u_n_mutex1.lock().unwrap();
-                    u_n[0]
-                };
-                let (x_est, p) = {
-                    // ロックを取得できるまで待機
-                    let mut ukf = ukf_mutex.lock().expect("Failed to lock");
-                    let dt = pre.elapsed().as_secs_f64();
-                    pre = std::time::Instant::now();
-                    let fx = |x: &_, u| dynamics_short(x, u, dt);
-                    ukf.predict(u, fx);
-                    let hx = |state: &_| {
-                        // enable bit が 0 なら 0 にする
-                        let mut obs = hx(state);
-
-                        for i in 0..5 {
-                            if (enable & (1 << i)) == 0 {
-                                obs[i] = 0.0;
-                            }
-                        }
-                        obs
-                    };
-                    ukf.update(&x_obs, hx);
-                    (ukf.state(), ukf.covariance())
-                };
-                print!("\x1b[36mRcv: \x1b[m");
-                print!("t: {:5.2} ", start.elapsed().as_secs_f64());
-                print!(
-                    "est: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
-                    x_est[0],
-                    x_est[1],
-                    x_est[3].to_degrees(),
-                    x_est[4].to_degrees()
-                );
-                print!("en: {:05b} ", enable);
-                print!(
-                    "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-                    p[(0, 0)],
-                    p[(1, 1)],
-                    p[(3, 3)],
-                    p[(4, 4)]
-                );
-                print!(
-                    "obs: [{:6.0}, {:6.0}, {:4.0}, {:5.2}, {:5.2}] ",
-                    x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
-                );
-                print!("u: {:8.3} ", u);
-                println!();
-            }
-        }
-    });
+    start_ukf_thread(reader, u_n_mutex.clone(), ukf_mutex.clone());
 
     let start = std::time::Instant::now();
     let mut pre = start;
     loop {
         let x_est = {
-            let ukf = ukf_mutex1.lock().unwrap();
+            let ukf = ukf_mutex.lock().unwrap();
             ukf.state()
         };
+        let x_est = vector![x_est[0], x_est[1], x_est[3], x_est[4]];
 
         // θの絶対値がpi/2を超えればエラー
-        if x_est[3].abs() > std::f64::consts::PI / 2.0 {
+        if x_est[2].abs() > std::f64::consts::PI / 2.0 {
             println!("x[2] is over pi/2");
             println!(
                 "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}] ",
@@ -114,30 +56,13 @@ fn main() {
             break;
         }
 
-        let f = |u: &[f64], c: &mut f64| -> Result<(), SolverError> {
-            let u = na::SVectorView::<f64, N>::from_slice(u);
-            *c = cost(&x_est, &u);
-            Ok(())
-        };
-
-        let df = |u: &[f64], grad: &mut [f64]| -> Result<(), SolverError> {
-            let u = na::SVectorView::<f64, N>::from_slice(u);
-            let g = grad_cost(&x_est, &u);
-            grad.copy_from_slice(g.as_slice());
-            Ok(())
-        };
-
         let mut u = {
-            let u = u_n_mutex2.lock().unwrap();
+            let u = u_n_mutex.lock().unwrap();
             *u
         };
 
-        let bounds = constraints::Rectangle::new(Some(&[-10.0]), Some(&[10.0]));
-        let problem = Problem::new(&bounds, df, f);
-        let mut panoc = PANOCOptimizer::new(problem, &mut panoc_cache)
-            .with_max_iter(max_iters)
-            .with_max_duration(max_dur);
-        let _status = panoc.solve(u.as_mut_slice()).expect("Failed to solve");
+        let _status =
+            solve_control_optimization(&x_est, &mut u, &mut panoc_cache).expect("Failed to solve");
 
         // wait秒は待機させる
         const WAIT: std::time::Duration = Duration::from_millis(5);
@@ -148,7 +73,7 @@ fn main() {
         pre = std::time::Instant::now();
 
         {
-            let mut tmp = u_n_mutex2.lock().unwrap();
+            let mut tmp = u_n_mutex.lock().unwrap();
             *tmp = u;
         }
 
@@ -161,8 +86,8 @@ fn main() {
             "est: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
             x_est[0],
             x_est[1],
-            x_est[3].to_degrees(),
-            x_est[4].to_degrees()
+            x_est[2].to_degrees(),
+            x_est[3].to_degrees()
         );
         print!("u: {:8.3} ", u[0]);
         println!();
@@ -215,9 +140,9 @@ const B: na::Vector4<f64> = matrix![
     -M2 * L / D / R_W * KT * DT;
 ];
 const C: na::Matrix4<f64> = matrix![
-    5.0, 0.0, 0.0, 0.0;
-    0.0, 5.0, 0.0, 0.0;
-    0.0, 0.0, 1.0, 0.0;
+    1.0, 0.0, 0.0, 0.0;
+    0.0, 1.0, 0.0, 0.0;
+    0.0, 0.0, 10.0, 0.0;
     0.0, 0.0, 0.0, 1.0
 ];
 
@@ -249,7 +174,7 @@ fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     r
 }
 
-fn cost<S>(x: &na::Vector6<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> f64
+fn cost<S>(x: &na::Vector4<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> f64
 where
     S: na::Storage<f64, na::Const<N>>,
 {
@@ -257,15 +182,14 @@ where
     let g: na::SMatrix<f64, { 4 * N }, N> = create_g_matrix!(A, B, N);
     let q = create_q_matrix!(C, N);
 
-    let x = vector![x[0], x[1], x[3], x[4]];
-    let x_ref = gen_ref(&x);
+    let x_ref = gen_ref(x);
     let x_ref = na::SVectorView::<f64, { 4 * N }>::from_slice(x_ref.as_slice());
     let left = u.transpose() * g.transpose() * q * g * u;
     let right = 2.0 * (x.transpose() * a.transpose() - x_ref.transpose()) * q * g * u;
     left[0] + right[0]
 }
 
-fn grad_cost<S>(x: &na::Vector6<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> na::SVector<f64, N>
+fn grad_cost<S>(x: &na::Vector4<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> na::SVector<f64, N>
 where
     S: na::Storage<f64, na::Const<N>>,
 {
@@ -273,8 +197,7 @@ where
     let g: na::SMatrix<f64, { 4 * N }, N> = create_g_matrix!(A, B, N);
     let q = create_q_matrix!(C, N);
 
-    let x = vector![x[0], x[1], x[3], x[4]];
-    let x_ref = gen_ref(&x);
+    let x_ref = gen_ref(x);
     let x_ref = na::SVectorView::<f64, { 4 * N }>::from_slice(x_ref.as_slice());
     2.0 * g.transpose() * q * (g * u + a * x - x_ref)
 }
@@ -301,8 +224,8 @@ fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
         0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
         0.0, 0.0, 0.0, 0.0, 1.0, 1e2;
         0.0, 0.0, 0.0, 1.0, 1e2, 1e4;
-    ];
-    let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&vector![50.0, 50.0, 5.0, 0.2, 0.2]);
+    ] * 0.25;
+    let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&vector![1500.0, 1500.0, 5.0, 0.2, 0.2]);
     let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
@@ -332,4 +255,99 @@ fn read(reader: &mut BufReader<Box<dyn serialport::SerialPort>>) -> Option<Senso
     } else {
         None
     }
+}
+
+// MARK: - Optimization
+fn solve_control_optimization(
+    x_est: &na::Vector4<f64>,
+    u_n: &mut na::SVector<f64, N>,
+    panoc_cache: &mut PANOCCache,
+) -> Result<optimization_engine::core::SolverStatus, SolverError> {
+    let max_dur: std::time::Duration = std::time::Duration::from_secs_f64(DT);
+
+    let f = |u: &[f64], c: &mut f64| -> Result<(), SolverError> {
+        let u = na::SVectorView::<f64, N>::from_slice(u);
+        *c = cost(x_est, &u);
+        Ok(())
+    };
+
+    let df = |u: &[f64], grad: &mut [f64]| -> Result<(), SolverError> {
+        let u = na::SVectorView::<f64, N>::from_slice(u);
+        let g = grad_cost(x_est, &u);
+        grad.copy_from_slice(g.as_slice());
+        Ok(())
+    };
+
+    let bounds = constraints::Rectangle::new(Some(&[LIMIT.0]), Some(&[LIMIT.1]));
+    let problem = Problem::new(&bounds, df, f);
+    let mut panoc = PANOCOptimizer::new(problem, panoc_cache)
+        .with_max_iter(usize::MAX)
+        .with_max_duration(max_dur);
+    panoc.solve(u_n.as_mut_slice())
+}
+
+// MARK: - App
+fn start_ukf_thread(
+    mut reader: BufReader<Box<dyn serialport::SerialPort>>,
+    u_n_mutex: Arc<Mutex<na::SVector<f64, N>>>,
+    ukf_mutex: Arc<Mutex<UnscentedKalmanFilter>>,
+) {
+    thread::spawn(move || {
+        // データが読み込まれるまで待機
+        let start = std::time::Instant::now();
+        let mut pre = start;
+        loop {
+            if let Some(s) = read(&mut reader) {
+                let (enable, x_obs) = Sensor::parse(s);
+                let u = {
+                    let u_n = u_n_mutex.lock().unwrap();
+                    u_n[0]
+                };
+                let (x_est, p) = {
+                    // ロックを取得できるまで待機
+                    let mut ukf = ukf_mutex.lock().expect("Failed to lock");
+                    let dt = pre.elapsed().as_secs_f64();
+                    pre = std::time::Instant::now();
+                    let fx = |x: &_, u| dynamics_short(x, u, dt);
+                    ukf.predict(u, fx);
+                    let hx = |state: &_| {
+                        // enable bit が 0 なら 0 にする
+                        let mut obs = hx(state);
+
+                        for i in 0..5 {
+                            if (enable & (1 << i)) == 0 {
+                                obs[i] = 0.0;
+                            }
+                        }
+                        obs
+                    };
+                    ukf.update(&x_obs, hx);
+                    (ukf.state(), ukf.covariance())
+                };
+                print!("\x1b[36mRcv: \x1b[m");
+                print!("t: {:5.2} ", start.elapsed().as_secs_f64());
+                print!(
+                    "est: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
+                    x_est[0],
+                    x_est[1],
+                    x_est[3].to_degrees(),
+                    x_est[4].to_degrees()
+                );
+                print!("en: {:05b} ", enable);
+                print!(
+                    "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                    p[(0, 0)],
+                    p[(1, 1)],
+                    p[(3, 3)],
+                    p[(4, 4)]
+                );
+                print!(
+                    "obs: [{:6.0}, {:6.0}, {:4.0}, {:5.2}, {:5.2}] ",
+                    x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
+                );
+                print!("u: {:8.3} ", u);
+                println!();
+            }
+        }
+    });
 }
