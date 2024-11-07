@@ -17,6 +17,9 @@ const DT: f64 = T / N as f64;
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
 
+// UKF
+const R: na::SVector<f64, 5> = vector![50.0, 50.0, 50.0, 0.2, 0.2];
+
 // MARK: - Main
 fn main() {
     let mut port = serialport::new("/dev/ttyUSB0", 115_200)
@@ -226,7 +229,7 @@ fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
         0.0, 0.0, 0.0, 0.0, 1.0, 1e2;
         0.0, 0.0, 0.0, 1.0, 1e2, 1e4;
     ] * 0.25;
-    let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&vector![1500.0, 1500.0, 5.0, 0.2, 0.2]);
+    let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&R);
     let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
