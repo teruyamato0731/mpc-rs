@@ -13,12 +13,13 @@ const T: f64 = 0.8;
 const N: usize = 8;
 const DT: f64 = T / N as f64;
 
+// 制約
+const LIMIT: (f64, f64) = (-10.0, 10.0);
+
 // MARK: - Main
 fn main() {
     let tolerance = 1e-6;
     let lbfgs_memory = 20;
-    let max_iters = usize::MAX;
-    let max_dur = std::time::Duration::from_secs_f64(DT);
     let mut panoc_cache = PANOCCache::new(N, tolerance, lbfgs_memory);
 
     let init_u_n = na::SVector::<f64, N>::zeros();
@@ -46,30 +47,12 @@ fn main() {
             break;
         }
 
-        let f = |u: &[f64], c: &mut f64| -> Result<(), SolverError> {
-            let u = na::SVectorView::<f64, N>::from_slice(u);
-            *c = cost(&x_est, &u);
-            Ok(())
-        };
-
-        let df = |u: &[f64], grad: &mut [f64]| -> Result<(), SolverError> {
-            let u = na::SVectorView::<f64, N>::from_slice(u);
-            let g = grad_cost(&x_est, &u);
-            grad.copy_from_slice(g.as_slice());
-            Ok(())
-        };
-
         let mut u = {
             let u = u_n_mutex.lock().unwrap();
             *u
         };
-
-        let bounds = constraints::Rectangle::new(Some(&[-10.0]), Some(&[10.0]));
-        let problem = Problem::new(&bounds, df, f);
-        let mut panoc = PANOCOptimizer::new(problem, &mut panoc_cache)
-            .with_max_iter(max_iters)
-            .with_max_duration(max_dur);
-        let _status = panoc.solve(u.as_mut_slice()).expect("Failed to solve");
+        let _ =
+            solve_control_optimization(&x_est, &mut u, &mut panoc_cache).expect("Failed to solve");
 
         // wait秒は待機させる
         const WAIT: std::time::Duration = Duration::from_millis(5);
@@ -259,6 +242,7 @@ fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
     ]
 }
 
+// MARK: - App
 fn start_dynamics_thread(
     x_mutex: Arc<Mutex<na::Vector6<f64>>>,
     u_n_mutex: Arc<Mutex<na::SVector<f64, N>>>,
@@ -345,4 +329,32 @@ fn start_ukf_thread(
             thread::sleep(Duration::from_micros(500));
         }
     });
+}
+
+fn solve_control_optimization(
+    x_est: &na::Vector4<f64>,
+    u_n: &mut na::SVector<f64, N>,
+    panoc_cache: &mut PANOCCache,
+) -> Result<optimization_engine::core::SolverStatus, SolverError> {
+    let max_dur: std::time::Duration = std::time::Duration::from_secs_f64(DT);
+
+    let f = |u: &[f64], c: &mut f64| -> Result<(), SolverError> {
+        let u = na::SVectorView::<f64, N>::from_slice(u);
+        *c = cost(x_est, &u);
+        Ok(())
+    };
+
+    let df = |u: &[f64], grad: &mut [f64]| -> Result<(), SolverError> {
+        let u = na::SVectorView::<f64, N>::from_slice(u);
+        let g = grad_cost(x_est, &u);
+        grad.copy_from_slice(g.as_slice());
+        Ok(())
+    };
+
+    let bounds = constraints::Rectangle::new(Some(&[LIMIT.0]), Some(&[LIMIT.1]));
+    let problem = Problem::new(&bounds, df, f);
+    let mut panoc = PANOCOptimizer::new(problem, panoc_cache)
+        .with_max_iter(usize::MAX)
+        .with_max_duration(max_dur);
+    panoc.solve(u_n.as_mut_slice())
 }
