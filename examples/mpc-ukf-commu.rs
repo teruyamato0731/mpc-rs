@@ -94,39 +94,7 @@ fn main() {
     }
 }
 
-// MARK: - MPC
-macro_rules! create_a_matrix {
-    ($a:expr, $n:expr) => {{
-        let mut a = na::SMatrix::<f64, { 4 * $n }, 4>::zeros();
-        for i in 0..$n {
-            a.fixed_view_mut::<4, 4>(4 * i, 0)
-                .copy_from(&$a.pow((i + 1) as u32));
-        }
-        a
-    }};
-}
-macro_rules! create_g_matrix {
-    ($a:expr, $b:expr, $n:expr) => {{
-        let mut g = na::SMatrix::<f64, { 4 * $n }, $n>::zeros();
-        for i in 0..$n {
-            for j in 0..=i {
-                g.fixed_view_mut::<4, 1>(4 * i, j)
-                    .copy_from(&(A.pow((i - j) as u32) * B));
-            }
-        }
-        g
-    }};
-}
-macro_rules! create_q_matrix {
-    ($c:expr, $n:expr) => {{
-        let mut q = na::SMatrix::<f64, { 4 * $n }, { 4 * $n }>::zeros();
-        for i in 0..$n {
-            q.fixed_view_mut::<4, 4>(4 * i, 4 * i).copy_from(&$c);
-        }
-        q
-    }};
-}
-
+// MARK: - Dynamics
 const A: na::Matrix4<f64> = matrix![
     1.0, DT, 0.0, 0.0;
     0.0, 1.0, -M2 * M2 * G * L * L / (2.0 * D) * DT, 0.0;
@@ -172,6 +140,39 @@ fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let term2 = (KT * u / R_W + 0.5 * M2 * L * x[4].powi(2) * x[3].sin()) * M2 * L * x[3].cos();
     r[5] = (term1 - term2) / d;
     r
+}
+
+// MARK: - MPC
+macro_rules! create_a_matrix {
+    ($a:expr, $n:expr) => {{
+        let mut a = na::SMatrix::<f64, { 4 * $n }, 4>::zeros();
+        for i in 0..$n {
+            a.fixed_view_mut::<4, 4>(4 * i, 0)
+                .copy_from(&$a.pow((i + 1) as u32));
+        }
+        a
+    }};
+}
+macro_rules! create_g_matrix {
+    ($a:expr, $b:expr, $n:expr) => {{
+        let mut g = na::SMatrix::<f64, { 4 * $n }, $n>::zeros();
+        for i in 0..$n {
+            for j in 0..=i {
+                g.fixed_view_mut::<4, 1>(4 * i, j)
+                    .copy_from(&(A.pow((i - j) as u32) * B));
+            }
+        }
+        g
+    }};
+}
+macro_rules! create_q_matrix {
+    ($c:expr, $n:expr) => {{
+        let mut q = na::SMatrix::<f64, { 4 * $n }, { 4 * $n }>::zeros();
+        for i in 0..$n {
+            q.fixed_view_mut::<4, 4>(4 * i, 4 * i).copy_from(&$c);
+        }
+        q
+    }};
 }
 
 fn cost<S>(x: &na::Vector4<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> f64
