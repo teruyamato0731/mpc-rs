@@ -10,7 +10,7 @@ use std::time::Duration;
 
 // 予測ホライゾン
 const T: f64 = 0.8;
-const N: usize = 50;
+const N: usize = 8;
 const DT: f64 = T / N as f64;
 
 // MARK: - Main
@@ -23,96 +23,19 @@ fn main() {
 
     let init_u_n = na::SVector::<f64, N>::zeros();
     let u_n_mutex = Arc::new(Mutex::new(init_u_n));
-    let u_n_mutex1 = u_n_mutex.clone();
-    let u_n_mutex2 = u_n_mutex.clone();
     let init_x = vector![0.5, 0.0, 0.0, 0.1, 0.0, 0.0];
-    let x = Arc::new(Mutex::new(init_x));
-    let x1 = x.clone();
+    let x_mutex = Arc::new(Mutex::new(init_x));
     let ukf_mutex = init_ukf(&init_x);
-    let ukf_mutex1 = ukf_mutex.clone();
 
-    thread::spawn(move || {
-        let start = std::time::Instant::now();
-        let mut pre = start;
-        loop {
-            {
-                let u = {
-                    let u_n = u_n_mutex.lock().unwrap();
-                    u_n[0]
-                };
-                let mut x = x.lock().unwrap();
-                *x = dynamics_short(&x, u, pre.elapsed().as_secs_f64());
-            }
-            pre = std::time::Instant::now();
-        }
-    });
+    start_dynamics_thread(x_mutex.clone(), u_n_mutex.clone());
 
-    thread::spawn(move || {
-        // データが読み込まれるまで待機
-        let start = std::time::Instant::now();
-        let mut pre = start;
-        loop {
-            let x = {
-                // ロックを取得できるまで待機
-                let x = x1.lock().expect("Failed to lock");
-                *x
-            };
-            let x_obs = sensor(&x);
-            // センサの遅延
-            thread::sleep(Duration::from_micros(1000));
-            let u = {
-                let u_n = u_n_mutex1.lock().unwrap();
-                u_n[0]
-            };
-            let (x_est, p) = {
-                // ロックを取得できるまで待機
-                let mut ukf = ukf_mutex.lock().expect("Failed to lock");
-                let dt = pre.elapsed().as_secs_f64();
-                pre = std::time::Instant::now();
-                let fx = |x: &_, u: f64| dynamics_short(x, u, dt);
-                ukf.predict(u, fx);
-                ukf.update(&x_obs, hx);
-                (ukf.state(), ukf.covariance())
-            };
-            print!("\x1b[36mRcv: \x1b[m");
-            print!("t: {:5.2} ", start.elapsed().as_secs_f64());
-            print!(
-                "est: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
-                x_est[0],
-                x_est[1],
-                x_est[3].to_degrees(),
-                x_est[4].to_degrees()
-            );
-            print!(
-                "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-                p[(0, 0)],
-                p[(1, 1)],
-                p[(3, 3)],
-                p[(4, 4)],
-            );
-            print!(
-                "x: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
-                x[0],
-                x[1],
-                x[3].to_degrees(),
-                x[4].to_degrees()
-            );
-            print!(
-                "obs: [{:6.0}, {:6.0}, {:4.0}, {:5.2}, {:5.2}] ",
-                x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
-            );
-            print!("u: {:8.3} ", u);
-            println!();
-            // 次の送信まで待機
-            thread::sleep(Duration::from_micros(500));
-        }
-    });
+    start_ukf_thread(x_mutex.clone(), u_n_mutex.clone(), ukf_mutex.clone());
 
     let start = std::time::Instant::now();
     let mut pre = start;
     loop {
         let x_est = {
-            let ukf = ukf_mutex1.lock().unwrap();
+            let ukf = ukf_mutex.lock().unwrap();
             ukf.state()
         };
         let x_est = vector![x_est[0], x_est[1], x_est[3], x_est[4]];
@@ -137,7 +60,7 @@ fn main() {
         };
 
         let mut u = {
-            let u = u_n_mutex2.lock().unwrap();
+            let u = u_n_mutex.lock().unwrap();
             *u
         };
 
@@ -157,7 +80,7 @@ fn main() {
         pre = std::time::Instant::now();
 
         {
-            let mut tmp = u_n_mutex2.lock().unwrap();
+            let mut tmp = u_n_mutex.lock().unwrap();
             *tmp = u;
         }
 
@@ -175,6 +98,7 @@ fn main() {
     }
 }
 
+// MARK: - MPC
 macro_rules! create_a_matrix {
     ($a:expr, $n:expr) => {{
         let mut a = na::SMatrix::<f64, { 4 * $n }, 4>::zeros();
@@ -220,10 +144,10 @@ const B: na::Vector4<f64> = matrix![
     -M2 * L / D / R_W * KT * DT;
 ];
 const C: na::Matrix4<f64> = matrix![
-    5.0, 0.0, 0.0, 0.0;
-    0.0, 5.0, 0.0, 0.0;
-    0.0, 0.0, 1.0, 0.0;
-    0.0, 0.0, 0.0, 1.0
+    1.0, 0.0, 0.0, 0.0;
+    0.0, 1.0, 0.0, 0.0;
+    0.0, 0.0, 10.0, 0.0;
+    0.0, 0.0, 0.0, 5.0
 ];
 
 // 系ダイナミクスを記述
@@ -305,7 +229,7 @@ fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
         0.0, 0.0, 0.0, 0.0, 1.0, 1e2;
         0.0, 0.0, 0.0, 1.0, 1e2, 1e4;
     ];
-    let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&vector![50.0, 50.0, 5.0, 0.2, 0.2]);
+    let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&vector![50.0, 50.0, 30.0, 0.2, 0.2]);
     let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
@@ -316,7 +240,7 @@ fn sensor(x: &na::Vector6<f64>) -> na::Vector5<f64> {
     let noise = vector![
         50.0 * dist.sample(&mut rng),
         50.0 * dist.sample(&mut rng),
-        5.0 * dist.sample(&mut rng),
+        30.0 * dist.sample(&mut rng),
         0.1 * dist.sample(&mut rng),
         0.1 * dist.sample(&mut rng),
     ];
@@ -333,4 +257,92 @@ fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
         az / G,                                    // 垂直方向の力 [m/s^2] -> [G]
         ax / G,                                    // 水平方向の力 [m/s^2] -> [G]
     ]
+}
+
+fn start_dynamics_thread(
+    x_mutex: Arc<Mutex<na::Vector6<f64>>>,
+    u_n_mutex: Arc<Mutex<na::SVector<f64, N>>>,
+) {
+    thread::spawn(move || {
+        let start = std::time::Instant::now();
+        let mut pre = start;
+        loop {
+            {
+                let u = {
+                    let u_n = u_n_mutex.lock().unwrap();
+                    u_n[0]
+                };
+                let mut x = x_mutex.lock().unwrap();
+                *x = dynamics_short(&x, u, pre.elapsed().as_secs_f64());
+            }
+            pre = std::time::Instant::now();
+        }
+    });
+}
+
+fn start_ukf_thread(
+    x: Arc<Mutex<na::Vector6<f64>>>,
+    u_n_mutex: Arc<Mutex<na::SVector<f64, N>>>,
+    ukf_mutex: Arc<Mutex<UnscentedKalmanFilter>>,
+) {
+    thread::spawn(move || {
+        // データが読み込まれるまで待機
+        let start = std::time::Instant::now();
+        let mut pre = start;
+        loop {
+            let x = {
+                // ロックを取得できるまで待機
+                let x = x.lock().expect("Failed to lock");
+                *x
+            };
+            let x_obs = sensor(&x);
+            // センサの遅延
+            thread::sleep(Duration::from_micros(1000));
+            let u = {
+                let u_n = u_n_mutex.lock().unwrap();
+                u_n[0]
+            };
+            let (x_est, p) = {
+                // ロックを取得できるまで待機
+                let mut ukf = ukf_mutex.lock().expect("Failed to lock");
+                let dt = pre.elapsed().as_secs_f64();
+                pre = std::time::Instant::now();
+                let fx = |x: &_, u: f64| dynamics_short(x, u, dt);
+                ukf.predict(u, fx);
+                ukf.update(&x_obs, hx);
+                (ukf.state(), ukf.covariance())
+            };
+            print!("\x1b[36mRcv: \x1b[m");
+            print!("t: {:5.2} ", start.elapsed().as_secs_f64());
+            print!(
+                "est: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
+                x_est[0],
+                x_est[1],
+                x_est[3].to_degrees(),
+                x_est[4].to_degrees()
+            );
+            print!(
+                "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                p[(0, 0)],
+                p[(1, 1)],
+                p[(3, 3)],
+                p[(4, 4)],
+            );
+            print!(
+                "x: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
+                x[0],
+                x[1],
+                x[3].to_degrees(),
+                x[4].to_degrees()
+            );
+            print!(
+                "obs: [{:6.0}, {:6.0}, {:4.0}, {:5.2}, {:5.2}] ",
+                x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
+            );
+            print!("u: {:8.3} ", u);
+            println!();
+            // 次の送信まで待機
+            thread::sleep(Duration::from_micros(500));
+        }
+    });
 }
