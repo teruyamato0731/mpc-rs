@@ -1,5 +1,5 @@
 extern crate nalgebra as na;
-use mpc::ukf::UnscentedKalmanFilter;
+use mpc::ukf2::UnscentedKalmanFilter;
 use na::{matrix, vector};
 use optimization_engine::{panoc::*, *};
 use rand_distr::Distribution as _;
@@ -13,6 +13,7 @@ const T: f64 = 0.8;
 const N: usize = 50;
 const DT: f64 = T / N as f64;
 
+// MARK: - Main
 fn main() {
     let tolerance = 1e-6;
     let lbfgs_memory = 20;
@@ -24,7 +25,7 @@ fn main() {
     let u_n_mutex = Arc::new(Mutex::new(init_u_n));
     let u_n_mutex1 = u_n_mutex.clone();
     let u_n_mutex2 = u_n_mutex.clone();
-    let init_x = vector![0.5, 0.0, 0.1, 0.0];
+    let init_x = vector![0.5, 0.0, 0.0, 0.1, 0.0, 0.0];
     let x = Arc::new(Mutex::new(init_x));
     let x1 = x.clone();
     let ukf_mutex = init_ukf(&init_x);
@@ -58,7 +59,7 @@ fn main() {
             };
             let x_obs = sensor(&x);
             // センサの遅延
-            thread::sleep(Duration::from_millis(1));
+            thread::sleep(Duration::from_micros(1000));
             let u = {
                 let u_n = u_n_mutex1.lock().unwrap();
                 u_n[0]
@@ -68,7 +69,7 @@ fn main() {
                 let mut ukf = ukf_mutex.lock().expect("Failed to lock");
                 let dt = pre.elapsed().as_secs_f64();
                 pre = std::time::Instant::now();
-                let fx = |x: &na::Vector4<f64>, u: f64| dynamics_short(x, u, dt);
+                let fx = |x: &_, u: f64| dynamics_short(x, u, dt);
                 ukf.predict(u, fx);
                 ukf.update(&x_obs, hx);
                 (ukf.state(), ukf.covariance())
@@ -76,33 +77,45 @@ fn main() {
             print!("\x1b[36mRcv: \x1b[m");
             print!("t: {:5.2} ", start.elapsed().as_secs_f64());
             print!(
-                "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-                x[0], x[1], x[2], x[3]
-            );
-            print!(
-                "est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-                x_est[0], x_est[1], x_est[2], x_est[3]
+                "est: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
+                x_est[0],
+                x_est[1],
+                x_est[3].to_degrees(),
+                x_est[4].to_degrees()
             );
             print!(
                 "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
                 p[(0, 0)],
                 p[(1, 1)],
-                p[(2, 2)],
-                p[(3, 3)]
+                p[(3, 3)],
+                p[(4, 4)],
+            );
+            print!(
+                "x: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
+                x[0],
+                x[1],
+                x[3].to_degrees(),
+                x[4].to_degrees()
+            );
+            print!(
+                "obs: [{:6.0}, {:6.0}, {:4.0}, {:5.2}, {:5.2}] ",
+                x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
             );
             print!("u: {:8.3} ", u);
             println!();
             // 次の送信まで待機
-            thread::sleep(Duration::from_millis(2));
+            thread::sleep(Duration::from_micros(500));
         }
     });
 
     let start = std::time::Instant::now();
+    let mut pre = start;
     loop {
         let x_est = {
             let ukf = ukf_mutex1.lock().unwrap();
             ukf.state()
         };
+        let x_est = vector![x_est[0], x_est[1], x_est[3], x_est[4]];
 
         // x[2]の絶対値がpi/2を超えればエラー
         if x_est[2].abs() > std::f64::consts::PI / 2.0 {
@@ -135,6 +148,14 @@ fn main() {
             .with_max_duration(max_dur);
         let _status = panoc.solve(u.as_mut_slice()).expect("Failed to solve");
 
+        // wait秒は待機させる
+        const WAIT: std::time::Duration = Duration::from_millis(5);
+        let elapsed = pre.elapsed();
+        if elapsed < WAIT {
+            thread::sleep(WAIT - elapsed);
+        }
+        pre = std::time::Instant::now();
+
         {
             let mut tmp = u_n_mutex2.lock().unwrap();
             *tmp = u;
@@ -143,13 +164,14 @@ fn main() {
         print!("\x1b[32mCon: \x1b[m");
         print!("t: {:5.2} ", start.elapsed().as_secs_f64());
         print!(
-            "est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-            x_est[0], x_est[1], x_est[2], x_est[3]
+            "est: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
+            x_est[0],
+            x_est[1],
+            x_est[2].to_degrees(),
+            x_est[3].to_degrees()
         );
         print!("u: {:8.3} ", u[0]);
         println!();
-
-        thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -205,28 +227,30 @@ const C: na::Matrix4<f64> = matrix![
 ];
 
 // 系ダイナミクスを記述
-const M1: f64 = 150e-3;
+const M1: f64 = 160e-3;
 const R_W: f64 = 50e-3;
-const M2: f64 = 2.3 - 2.0 * M1 + 2.0;
-const L: f64 = 0.2474; // 重心までの距離
-const J1: f64 = M1 * R_W * R_W;
-const J2: f64 = 0.2;
+const M2: f64 = 2.16 - 2.0 * M1;
+const L: f64 = 0.4; // 重心までの距離
+const J1: f64 = 2.23e5 * 1e-9; // タイヤの慣性モーメント
+const J2: f64 = 1.2; // リポあり
 const G: f64 = 9.81;
-const KT: f64 = 0.15; // m2006
-const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2) - M2 * M2 * L * L;
+const KT: f64 = 0.15; // m2006 * 2
+const D: f64 = (M1 + 0.5 * M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2) - 0.5 * M2 * M2 * L * L;
 // 非線形
-fn dynamics_short(x: &na::Vector4<f64>, u: f64, dt: f64) -> na::Vector4<f64> {
+fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let mut r = *x;
     const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2);
-    let d = D - M2 * M2 * L * L * x[2].cos() * x[2].cos();
-    let term1 = (M1 + M2 + J1 / (R_W * R_W)) * M2 * G * L * x[2].sin();
-    let term2 = (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin()) * M2 * L * x[2].cos();
-    r[3] += (term1 - term2) / d * dt;
-    r[2] += x[3] * dt;
-    let term3 = (J2 + M2 * L * L) * (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin());
-    let term4 = M2 * G * L * L * x[2].sin() * x[2].cos();
-    r[1] += (term3 + term4) / d * dt;
+    let d = D - 0.5 * (M2 * L * x[2].cos()).powi(2);
     r[0] += x[1] * dt;
+    r[1] += x[2] * dt;
+    let term3 = (J2 + M2 * L * L) * (KT * u / R_W + M2 * L * x[4].powi(2) * x[3].sin());
+    let term4 = 0.5 * M2 * G * L * L * x[3].sin() * x[3].cos();
+    r[2] = (term3 + term4) / d;
+    r[3] += x[4] * dt;
+    r[4] += x[5] * dt;
+    let term1 = (M1 + 0.5 * M2 + J1 / (R_W * R_W)) * M2 * G * L * x[3].sin();
+    let term2 = (KT * u / R_W + 0.5 * M2 * L * x[4].powi(2) * x[3].sin()) * M2 * L * x[3].cos();
+    r[5] = (term1 - term2) / d;
     r
 }
 
@@ -270,43 +294,55 @@ fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
     r
 }
 
-fn init_ukf(init: &na::Vector4<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
+fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = matrix![
-        1.0, 0.0, 0.0, 0.0;
-        0.0, 1.0, 0.0, 0.0;
-        0.0, 0.0, 1.0, 0.0;
-        0.0, 0.0, 0.0, 1.0;
+        1.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 1.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 1.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 1.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
     ];
     let q = matrix![
-        0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 1.0;
-        0.0, 0.0, 1.0, 1e2;
-        0.0, 1.0, 1e2, 1e4;
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
+        0.0, 0.0, 0.0, 0.0, 1.0, 1e2;
+        0.0, 0.0, 0.0, 1.0, 1e2, 1e4;
     ];
     let r = matrix![
-        50.0, 0.0, 0.0;
-        0.0, 50.0, 0.0;
-        0.0, 0.0, 0.5;
+        50.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 50.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 5.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.2, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.2;
     ];
     let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
 
-fn sensor(x: &na::Vector4<f64>) -> na::Vector3<f64> {
+fn sensor(x: &na::Vector6<f64>) -> na::Vector5<f64> {
     let mut rng = rand::thread_rng();
     let dist = rand_distr::Normal::<f64>::new(0.0, 1.0).unwrap();
-    let noise = na::Vector3::new(
+    let noise = vector![
         50.0 * dist.sample(&mut rng),
         50.0 * dist.sample(&mut rng),
-        0.5 * dist.sample(&mut rng),
-    );
+        5.0 * dist.sample(&mut rng),
+        0.1 * dist.sample(&mut rng),
+        0.1 * dist.sample(&mut rng),
+    ];
     hx(x) + noise
 }
 
-fn hx(state: &na::Vector4<f64>) -> na::Vector3<f64> {
-    na::Vector3::new(
-        60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
-        60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
-        state[3].to_degrees(),              // 角速度 [rad/s] -> [deg/s]
-    )
+fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
+    let ax = G * state[3].sin() + state[2] * state[3].cos() + L * state[5];
+    let az = G * state[3].cos() - state[2] * state[3].sin() + L * state[4].powi(2);
+    vector![
+        36.0 * 60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
+        36.0 * -60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
+        state[4].to_degrees(),                     // 角速度 [rad/s] -> [deg/s]
+        az / G,                                    // 垂直方向の力 [m/s^2] -> [G]
+        ax / G,                                    // 水平方向の力 [m/s^2] -> [G]
+    ]
 }
