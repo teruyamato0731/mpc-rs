@@ -33,7 +33,6 @@ fn main() {
     start_ukf_thread(x_mutex.clone(), u_n_mutex.clone(), ukf_mutex.clone());
 
     let start = std::time::Instant::now();
-    let mut pre = start;
     loop {
         let x_est = {
             let ukf = ukf_mutex.lock().unwrap();
@@ -47,24 +46,22 @@ fn main() {
             break;
         }
 
-        let mut u = {
-            let u = u_n_mutex.lock().unwrap();
-            *u
+        let mut u_n = {
+            let u_n = u_n_mutex.lock().unwrap();
+            *u_n
         };
-        let _ =
-            solve_control_optimization(&x_est, &mut u, &mut panoc_cache).expect("Failed to solve");
+        let pre_u = u_n[0];
 
-        // wait秒は待機させる
-        const WAIT: std::time::Duration = Duration::from_millis(5);
-        let elapsed = pre.elapsed();
-        if elapsed < WAIT {
-            thread::sleep(WAIT - elapsed);
+        let _ = solve_control_optimization(&x_est, &mut u_n, &mut panoc_cache)
+            .expect("Failed to solve");
+
+        if approx_equal(pre_u, u_n[0]) {
+            continue;
         }
-        pre = std::time::Instant::now();
 
         {
             let mut tmp = u_n_mutex.lock().unwrap();
-            *tmp = u;
+            *tmp = u_n;
         }
 
         print!("\x1b[32mCon: \x1b[m");
@@ -76,7 +73,7 @@ fn main() {
             x_est[2].to_degrees(),
             x_est[3].to_degrees()
         );
-        print!("u: {:8.3} ", u[0]);
+        print!("u: {:8.3} ", u_n[0]);
         println!();
     }
 }
@@ -359,4 +356,9 @@ fn start_ukf_thread(
             thread::sleep(Duration::from_micros(500));
         }
     });
+}
+
+fn approx_equal(a: f64, b: f64) -> bool {
+    let epsilon = 1e-3;
+    (a - b).abs() < epsilon
 }

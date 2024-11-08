@@ -40,7 +40,6 @@ fn main() {
     start_ukf_thread(reader, u_n_mutex.clone(), ukf_mutex.clone());
 
     let start = std::time::Instant::now();
-    let mut pre = start;
     loop {
         let x_est = {
             let ukf = ukf_mutex.lock().unwrap();
@@ -69,17 +68,8 @@ fn main() {
             .expect("Failed to solve");
 
         if approx_equal(pre_u, u_n[0]) {
-            // println!("u_n is not updated");
             continue;
         }
-
-        // wait秒は待機させる
-        const WAIT: std::time::Duration = Duration::from_micros(2000);
-        let elapsed = pre.elapsed();
-        if elapsed < WAIT {
-            thread::sleep(WAIT - elapsed);
-        }
-        pre = std::time::Instant::now();
 
         {
             let mut tmp = u_n_mutex.lock().unwrap();
