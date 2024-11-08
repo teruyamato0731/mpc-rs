@@ -50,6 +50,7 @@ fn main() {
     start_dynamics_thread(x_mutex.clone(), u_n_mutex.clone());
 
     start_ukf_thread(x_mutex.clone(), u_n_mutex.clone(), ukf_mutex.clone());
+    start_logging_thread(x_mutex.clone(), u_n_mutex.clone(), ukf_mutex.clone());
 
     let start = std::time::Instant::now();
     let mut pre_u = 0.0;
@@ -328,4 +329,66 @@ fn start_ukf_thread(
 fn approx_equal(a: f64, b: f64) -> bool {
     let epsilon = 1e-2;
     (a - b).abs() < epsilon
+}
+
+// MARK: - Log
+fn write(
+    wtr: &mut csv::Writer<std::fs::File>,
+    t: f64,
+    u: f64,
+    x: na::Vector6<f64>,
+    x_est: na::Vector6<f64>,
+) -> Result<(), csv::Error> {
+    wtr.write_record(&[
+        t.to_string(),
+        u.to_string(),
+        x[0].to_string(),
+        x[1].to_string(),
+        x[2].to_string(),
+        x[3].to_string(),
+        x[4].to_string(),
+        x[5].to_string(),
+        x_est[0].to_string(),
+        x_est[1].to_string(),
+        x_est[2].to_string(),
+        x_est[3].to_string(),
+        x_est[4].to_string(),
+        x_est[5].to_string(),
+    ])?;
+    wtr.flush()?;
+    Ok(())
+}
+
+fn start_logging_thread(
+    x_mutex: Arc<Mutex<na::Vector6<f64>>>,
+    u_n_mutex: Arc<Mutex<na::SVector<f64, N>>>,
+    ukf_mutex: Arc<Mutex<UnscentedKalmanFilter>>,
+) {
+    thread::spawn(move || {
+        let mut wtr = csv::Writer::from_path("logs/mpc-ukf.csv").expect("Failed to create file");
+        let start = std::time::Instant::now();
+        let mut pre_write = start;
+        loop {
+            // ログの書き込み 100msごと
+            if pre_write.elapsed() > Duration::from_millis(100) {
+                pre_write = std::time::Instant::now();
+
+                let u = {
+                    let u = u_n_mutex.lock().unwrap();
+                    u[0]
+                };
+                let x = {
+                    let x = x_mutex.lock().unwrap();
+                    *x
+                };
+                let x_est = {
+                    let ukf = ukf_mutex.lock().unwrap();
+                    ukf.state()
+                };
+
+                write(&mut wtr, start.elapsed().as_secs_f64(), u, x, x_est)
+                    .expect("Failed to write");
+            }
+        }
+    });
 }
