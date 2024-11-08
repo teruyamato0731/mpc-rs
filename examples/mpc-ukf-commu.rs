@@ -342,14 +342,32 @@ fn start_ukf_thread(
                     p[(3, 3)],
                     p[(4, 4)]
                 );
-                print!(
-                    "obs: [{:6.0}, {:6.0}, {:4.0}, {:5.2}, {:5.2}] ",
-                    x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
-                );
+                print_obs(enable, &x_obs);
                 println!();
             }
         }
     });
+}
+
+// MARK: - Print
+macro_rules! print_obs {
+    ($fmt:expr, $x_obs:expr, $enable:expr) => {
+        if $enable != 0 {
+            print!($fmt, $x_obs);
+        } else {
+            print!("   -   ");
+        }
+    };
+}
+
+fn print_obs(enable: u8, x_obs: &na::Vector5<f64>) {
+    print!("obs: [");
+    print_obs!("{:6.0} ", x_obs[0], enable & 0b00001);
+    print_obs!("{:6.0} ", x_obs[1], enable & 0b00010);
+    print_obs!("{:6.0} ", x_obs[2], enable & 0b00100);
+    print_obs!("{:6.2} ", x_obs[3], enable & 0b01000);
+    print_obs!("{:6.2} ", x_obs[4], enable & 0b10000);
+    print!("] ");
 }
 
 fn approx_equal(a: f64, b: f64) -> bool {
