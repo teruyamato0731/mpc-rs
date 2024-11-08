@@ -11,7 +11,6 @@ use std::thread;
 use std::time::Duration;
 
 // MARK: - Constants
-
 // 予測ホライゾン
 const T: f64 = 0.8;
 const N: usize = 8;
@@ -21,14 +20,14 @@ const DT: f64 = T / N as f64;
 const LIMIT: (f64, f64) = (-10.0, 10.0);
 
 // UKF
-const PHY: f64 = 0.25;
+const PHY: f64 = 0.5;
 const Q: na::SMatrix<f64, 6, 6> = matrix![
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-    0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
-    0.0, 0.0, 0.0, 0.0, 1.0, 1e2;
-    0.0, 0.0, 0.0, 1.0, 1e2, 1e4;
+    0.0, 0.0, 0.0, 0.0, 0.0, 1.6e-2;
+    0.0, 0.0, 0.0, 0.0, 3.3e-2, 0.5;
+    0.0, 0.0, 0.0, 1.6e-2, 0.5, 1e4;
 ];
 const R: na::SVector<f64, 5> = vector![50.0, 50.0, 50.0, 0.2, 0.2];
 
@@ -52,6 +51,7 @@ fn main() {
     start_ukf_thread(reader, u_n_mutex.clone(), ukf_mutex.clone());
 
     let start = std::time::Instant::now();
+    let mut pre_u = 0.0;
     loop {
         let x_est = {
             let ukf = ukf_mutex.lock().unwrap();
@@ -74,7 +74,6 @@ fn main() {
             let u = u_n_mutex.lock().unwrap();
             *u
         };
-        let pre_u = u_n[0];
 
         let _status = solve_control_optimization(&x_est, &mut u_n, &mut panoc_cache)
             .expect("Failed to solve");
@@ -82,6 +81,7 @@ fn main() {
         if approx_equal(pre_u, u_n[0]) {
             continue;
         }
+        pre_u = u_n[0];
 
         {
             let mut tmp = u_n_mutex.lock().unwrap();
@@ -100,7 +100,7 @@ fn main() {
             x_est[2].to_degrees(),
             x_est[3].to_degrees()
         );
-        print!("u: {:8.3} ", u_n[0]);
+        print!("u: {:6.2} ", u_n[0]);
         println!();
     }
 }
@@ -299,8 +299,7 @@ fn start_ukf_thread(
                     x_est[3].to_degrees(),
                     x_est[4].to_degrees()
                 );
-                print!("u: {:8.3} ", u);
-                print!("en: {:05b} ", enable);
+                print!("u: {:6.2} ", u);
                 print!(
                     "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
                     p[(0, 0)],
@@ -313,6 +312,11 @@ fn start_ukf_thread(
             }
         }
     });
+}
+
+fn approx_equal(a: f64, b: f64) -> bool {
+    let epsilon = 1e-2;
+    (a - b).abs() < epsilon
 }
 
 // MARK: - Print
@@ -334,9 +338,4 @@ fn print_obs(enable: u8, x_obs: &na::Vector5<f64>) {
     print_obs!("{:6.2} ", x_obs[3], enable & 0b01000);
     print_obs!("{:6.2} ", x_obs[4], enable & 0b10000);
     print!("] ");
-}
-
-fn approx_equal(a: f64, b: f64) -> bool {
-    let epsilon = 1e-3;
-    (a - b).abs() < epsilon
 }
