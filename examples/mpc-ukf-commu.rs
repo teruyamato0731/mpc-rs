@@ -45,10 +45,9 @@ fn main() {
             let ukf = ukf_mutex.lock().unwrap();
             ukf.state()
         };
-        let x_est = vector![x_est[0], x_est[1], x_est[3], x_est[4]];
 
         // θの絶対値がpi/2を超えればエラー
-        if x_est[2].abs() > std::f64::consts::PI / 2.0 {
+        if x_est[3].abs() > std::f64::consts::PI / 2.0 {
             println!("x[2] is over pi/2");
             println!(
                 "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}] ",
@@ -57,6 +56,7 @@ fn main() {
             println!("elapsed: {:.2} sec", start.elapsed().as_secs_f64());
             break;
         }
+        let x_est = vector![x_est[0], x_est[1], x_est[3], x_est[4]];
 
         let mut u_n = {
             let u = u_n_mutex.lock().unwrap();
