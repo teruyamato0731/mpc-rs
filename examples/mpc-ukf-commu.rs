@@ -1,6 +1,7 @@
 extern crate nalgebra as na;
 use mpc::packet::{Control, Sensor3 as Sensor};
 use mpc::ukf2::UnscentedKalmanFilter;
+use mpc::{create_f_matrix, create_g_matrix, create_q_matrix};
 use na::{matrix, vector};
 use optimization_engine::{panoc::*, *};
 use std::f64::consts::PI;
@@ -142,64 +143,26 @@ fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
 }
 
 // MARK: - MPC
-macro_rules! create_a_matrix {
-    ($a:expr, $n:expr) => {{
-        let mut a = na::SMatrix::<f64, { 4 * $n }, 4>::zeros();
-        for i in 0..$n {
-            a.fixed_view_mut::<4, 4>(4 * i, 0)
-                .copy_from(&$a.pow((i + 1) as u32));
-        }
-        a
-    }};
-}
-macro_rules! create_g_matrix {
-    ($a:expr, $b:expr, $n:expr) => {{
-        let mut g = na::SMatrix::<f64, { 4 * $n }, $n>::zeros();
-        for i in 0..$n {
-            for j in 0..=i {
-                g.fixed_view_mut::<4, 1>(4 * i, j)
-                    .copy_from(&(A.pow((i - j) as u32) * B));
-            }
-        }
-        g
-    }};
-}
-macro_rules! create_q_matrix {
-    ($c:expr, $n:expr) => {{
-        let mut q = na::SMatrix::<f64, { 4 * $n }, { 4 * $n }>::zeros();
-        for i in 0..$n {
-            q.fixed_view_mut::<4, 4>(4 * i, 4 * i).copy_from(&$c);
-        }
-        q
-    }};
-}
-
-fn cost<S>(x: &na::Vector4<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> f64
-where
-    S: na::Storage<f64, na::Const<N>>,
-{
-    let a: na::SMatrix<f64, { 4 * N }, 4> = create_a_matrix!(A, N);
-    let g: na::SMatrix<f64, { 4 * N }, N> = create_g_matrix!(A, B, N);
-    let q = create_q_matrix!(C, N);
+const M: usize = 4;
+fn cost(x: &na::Vector4<f64>, u: &na::SVectorView<f64, N>) -> f64 {
+    let f = create_f_matrix!(A, N, M);
+    let g = create_g_matrix!(A, B, N, M);
+    let q = create_q_matrix!(C, N, M);
 
     let x_ref = gen_ref(x);
-    let x_ref = na::SVectorView::<f64, { 4 * N }>::from_slice(x_ref.as_slice());
+    let x_ref = na::SVectorView::<f64, { M * N }>::from_slice(x_ref.as_slice());
     let left = u.transpose() * g.transpose() * q * g * u;
-    let right = 2.0 * (x.transpose() * a.transpose() - x_ref.transpose()) * q * g * u;
+    let right = 2.0 * (x.transpose() * f.transpose() - x_ref.transpose()) * q * g * u;
     left[0] + right[0]
 }
-
-fn grad_cost<S>(x: &na::Vector4<f64>, u: &na::Vector<f64, na::Const<N>, S>) -> na::SVector<f64, N>
-where
-    S: na::Storage<f64, na::Const<N>>,
-{
-    let a: na::SMatrix<f64, { 4 * N }, 4> = create_a_matrix!(A, N);
-    let g: na::SMatrix<f64, { 4 * N }, N> = create_g_matrix!(A, B, N);
-    let q = create_q_matrix!(C, N);
+fn grad_cost(x: &na::Vector4<f64>, u: &na::SVectorView<f64, N>) -> na::SVector<f64, N> {
+    let f = create_f_matrix!(A, N, M);
+    let g = create_g_matrix!(A, B, N, M);
+    let q = create_q_matrix!(C, N, M);
 
     let x_ref = gen_ref(x);
-    let x_ref = na::SVectorView::<f64, { 4 * N }>::from_slice(x_ref.as_slice());
-    2.0 * g.transpose() * q * (g * u + a * x - x_ref)
+    let x_ref = na::SVectorView::<f64, { M * N }>::from_slice(x_ref.as_slice());
+    2.0 * g.transpose() * q * (g * u + f * x - x_ref)
 }
 
 fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
