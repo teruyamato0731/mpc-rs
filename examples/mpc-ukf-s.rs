@@ -16,6 +16,24 @@ const DT: f64 = T / N as f64;
 
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
+const C: na::Matrix4<f64> = matrix![
+    1.0, 0.0, 0.0, 0.0;
+    0.0, 1.0, 0.0, 0.0;
+    0.0, 0.0, 10.0, 0.0;
+    0.0, 0.0, 0.0, 5.0
+];
+
+// UKF
+const PHY: f64 = 0.5;
+const Q: na::SMatrix<f64, 6, 6> = matrix![
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+    0.0, 0.0, 0.0, 0.0, 0.0, 1.6e-2;
+    0.0, 0.0, 0.0, 0.0, 3.3e-2, 0.5;
+    0.0, 0.0, 0.0, 1.6e-2, 0.5, 1e4;
+];
+const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 50.0, 0.2, 0.2];
 
 // MARK: - Main
 fn main() {
@@ -34,6 +52,7 @@ fn main() {
     start_ukf_thread(x_mutex.clone(), u_n_mutex.clone(), ukf_mutex.clone());
 
     let start = std::time::Instant::now();
+    let mut pre_u = 0.0;
     loop {
         let x_est = {
             let ukf = ukf_mutex.lock().unwrap();
@@ -41,9 +60,9 @@ fn main() {
         };
         let x_est = vector![x_est[0], x_est[1], x_est[3], x_est[4]];
 
-        // x[2]の絶対値がpi/2を超えればエラー
+        // θの絶対値がpi/2を超えればエラー
         if x_est[2].abs() > std::f64::consts::PI / 2.0 {
-            println!("x[2] is over pi/2");
+            println!("θ is over pi/2");
             break;
         }
 
@@ -51,7 +70,6 @@ fn main() {
             let u_n = u_n_mutex.lock().unwrap();
             *u_n
         };
-        let pre_u = u_n[0];
 
         let _ = solve_control_optimization(&x_est, &mut u_n, &mut panoc_cache)
             .expect("Failed to solve");
@@ -59,6 +77,7 @@ fn main() {
         if approx_equal(pre_u, u_n[0]) {
             continue;
         }
+        pre_u = u_n[0];
 
         {
             let mut tmp = u_n_mutex.lock().unwrap();
@@ -74,7 +93,7 @@ fn main() {
             x_est[2].to_degrees(),
             x_est[3].to_degrees()
         );
-        print!("u: {:8.3} ", u_n[0]);
+        print!("u: {:6.2} ", u_n[0]);
         println!();
     }
 }
@@ -92,13 +111,8 @@ const B: na::Vector4<f64> = matrix![
     0.0;
     -M2 * L / D / R_W * KT * DT;
 ];
-const C: na::Matrix4<f64> = matrix![
-    1.0, 0.0, 0.0, 0.0;
-    0.0, 1.0, 0.0, 0.0;
-    0.0, 0.0, 10.0, 0.0;
-    0.0, 0.0, 0.0, 5.0
-];
 
+// MARK: - Dynamics
 // 系ダイナミクスを記述
 const M1: f64 = 160e-3;
 const R_W: f64 = 50e-3;
@@ -165,32 +179,10 @@ fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
 // MARK: - UKF
 fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = na::SMatrix::<f64, 6, 6>::identity() * 10.0;
-    let q = matrix![
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
-        0.0, 0.0, 0.0, 0.0, 1.0, 1e2;
-        0.0, 0.0, 0.0, 1.0, 1e2, 1e4;
-    ];
-    let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&vector![50.0, 50.0, 30.0, 0.2, 0.2]);
-    let obj = UnscentedKalmanFilter::new(*init, p, q, r);
+    let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&R);
+    let obj = UnscentedKalmanFilter::new(*init, p, PHY * Q, r);
     Arc::new(Mutex::new(obj))
 }
-
-fn sensor(x: &na::Vector6<f64>) -> na::Vector5<f64> {
-    let mut rng = rand::thread_rng();
-    let dist = rand_distr::Normal::<f64>::new(0.0, 1.0).unwrap();
-    let noise = vector![
-        50.0 * dist.sample(&mut rng),
-        50.0 * dist.sample(&mut rng),
-        30.0 * dist.sample(&mut rng),
-        0.1 * dist.sample(&mut rng),
-        0.1 * dist.sample(&mut rng),
-    ];
-    hx(x) + noise
-}
-
 fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
     let ax = G * state[3].sin() + state[2] * state[3].cos() + L * state[5];
     let az = G * state[3].cos() - state[2] * state[3].sin() + L * state[4].powi(2);
@@ -201,6 +193,18 @@ fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
         az / G,                                    // 垂直方向の力 [m/s^2] -> [G]
         ax / G,                                    // 水平方向の力 [m/s^2] -> [G]
     ]
+}
+fn sensor(x: &na::Vector6<f64>) -> na::Vector5<f64> {
+    let mut rng = rand::thread_rng();
+    let dist = rand_distr::Normal::<f64>::new(0.0, 1.0).unwrap();
+    let noise = vector![
+        R[0] * dist.sample(&mut rng),
+        R[1] * dist.sample(&mut rng),
+        R[2] * dist.sample(&mut rng),
+        R[3] * dist.sample(&mut rng),
+        R[4] * dist.sample(&mut rng),
+    ];
+    hx(x) + noise
 }
 
 // MARK: - Optimization
@@ -313,7 +317,7 @@ fn start_ukf_thread(
                 "obs: [{:6.0}, {:6.0}, {:4.0}, {:5.2}, {:5.2}] ",
                 x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
             );
-            print!("u: {:8.3} ", u);
+            print!("u: {:6.2} ", u);
             println!();
             // 次の送信まで待機
             thread::sleep(Duration::from_micros(500));
@@ -322,6 +326,6 @@ fn start_ukf_thread(
 }
 
 fn approx_equal(a: f64, b: f64) -> bool {
-    let epsilon = 1e-3;
+    let epsilon = 1e-2;
     (a - b).abs() < epsilon
 }

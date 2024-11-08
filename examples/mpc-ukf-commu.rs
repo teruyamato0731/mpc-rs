@@ -12,12 +12,18 @@ use std::time::Duration;
 
 // MARK: - Constants
 // 予測ホライゾン
-const T: f64 = 0.8;
+const T: f64 = 1.2;
 const N: usize = 8;
 const DT: f64 = T / N as f64;
 
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
+const C: na::Matrix4<f64> = matrix![
+    0.0, 0.0, 0.0, 0.0;
+    0.0, 0.0, 0.0, 0.0;
+    0.0, 0.0, 10.0, 0.0;
+    0.0, 0.0, 0.0, 0.0;
+];
 
 // UKF
 const PHY: f64 = 0.5;
@@ -29,7 +35,7 @@ const Q: na::SMatrix<f64, 6, 6> = matrix![
     0.0, 0.0, 0.0, 0.0, 3.3e-2, 0.5;
     0.0, 0.0, 0.0, 1.6e-2, 0.5, 1e4;
 ];
-const R: na::SVector<f64, 5> = vector![50.0, 50.0, 50.0, 0.2, 0.2];
+const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 50.0, 0.2, 0.2];
 
 // MARK: - Main
 fn main() {
@@ -117,12 +123,6 @@ const B: na::Vector4<f64> = matrix![
     (M2 * L * L + J2) / D / R_W * KT * DT;
     0.0;
     -M2 * L / D / R_W * KT * DT;
-];
-const C: na::Matrix4<f64> = matrix![
-    1.0, 0.0, 0.0, 0.0;
-    0.0, 1.0, 0.0, 0.0;
-    0.0, 0.0, 10.0, 0.0;
-    0.0, 0.0, 0.0, 1.0
 ];
 
 // 系ダイナミクスを記述
