@@ -10,8 +10,8 @@ use std::thread;
 use std::time::Duration;
 
 // 予測ホライゾン
-const T: f64 = 0.8;
-const N: usize = 8;
+const T: f64 = 1.2;
+const N: usize = 20;
 const DT: f64 = T / N as f64;
 
 // 制約
@@ -113,14 +113,13 @@ const B: na::Vector4<f64> = matrix![
     -M2 * L / D / R_W * KT * DT;
 ];
 
-// MARK: - Dynamics
 // 系ダイナミクスを記述
 const M1: f64 = 160e-3;
 const R_W: f64 = 50e-3;
 const M2: f64 = 2.16 - 2.0 * M1;
 const L: f64 = 0.4; // 重心までの距離
 const J1: f64 = 2.23e5 * 1e-9; // タイヤの慣性モーメント
-const J2: f64 = 1.2; // リポあり
+const J2: f64 = 1.168e8 * 1e-9; // リポあり
 const G: f64 = 9.81;
 const KT: f64 = 0.15; // m2006 * 2
 const D: f64 = (M1 + 0.5 * M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2) - 0.5 * M2 * M2 * L * L;
