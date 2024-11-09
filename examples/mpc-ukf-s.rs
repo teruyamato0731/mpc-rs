@@ -24,15 +24,7 @@ const C: na::Matrix4<f64> = matrix![
 ];
 
 // UKF
-const PHY: f64 = 0.5;
-const Q: na::SMatrix<f64, 6, 6> = matrix![
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-    0.0, 0.0, 0.0, 0.0, 0.0, 1.6e-2;
-    0.0, 0.0, 0.0, 0.0, 3.3e-2, 0.5;
-    0.0, 0.0, 0.0, 1.6e-2, 0.5, 1e4;
-];
+const PHY: f64 = 0.5e6;
 const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 50.0, 0.2, 0.2];
 
 // MARK: - Main
@@ -180,7 +172,8 @@ fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
 fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = na::SMatrix::<f64, 6, 6>::identity() * 10.0;
     let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&R);
-    let obj = UnscentedKalmanFilter::new(*init, p, PHY * Q, r);
+    let q = gen_q(DT);
+    let obj = UnscentedKalmanFilter::new(*init, p, PHY * q, r);
     Arc::new(Mutex::new(obj))
 }
 fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
@@ -205,6 +198,19 @@ fn sensor(x: &na::Vector6<f64>) -> na::Vector5<f64> {
         R[4] * dist.sample(&mut rng),
     ];
     hx(x) + noise
+}
+fn gen_q(dt: f64) -> na::SMatrix<f64, 6, 6> {
+    let dt_2 = dt.powi(2);
+    let dt_3 = dt.powi(3);
+    let q = matrix![
+        0.0, 0.0       , 0.0       , 0.0       , 0.0       , 0.0;
+        0.0, 0.0       , 0.0       , 0.0       , 0.5 * dt_3, 0.5 * dt_2;
+        0.0, 0.0       , 0.0       , 0.5 * dt_3, 1.0 * dt_2, 1.0 * dt;
+        0.0, 0.0       , 0.5 * dt_3, 0.0       , 0.5 * dt_3, 0.5 * dt_2;
+        0.0, 0.5 * dt_3, 1.0 * dt_2, 0.5 * dt_3, 1.0 * dt_2, 1.0 * dt;
+        0.0, 0.5 * dt_2, 1.0 * dt  , 0.5 * dt_2, 1.0 * dt  , 1.0;
+    ];
+    PHY * q
 }
 
 // MARK: - Optimization
@@ -286,6 +292,8 @@ fn start_ukf_thread(
                 let dt = pre.elapsed().as_secs_f64();
                 pre = std::time::Instant::now();
                 let fx = |x: &_, u: f64| dynamics_short(x, u, dt);
+                let q = gen_q(dt);
+                ukf.set_q(q);
                 ukf.predict(u, fx);
                 ukf.update(&x_obs, hx);
                 (ukf.state(), ukf.covariance())
