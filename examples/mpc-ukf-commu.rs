@@ -206,6 +206,19 @@ fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
         ax / G,                                    // 水平方向の力 [m/s^2] -> [G]
     ]
 }
+fn gen_q(dt: f64) -> na::SMatrix<f64, 6, 6> {
+    let dt_2 = dt.powi(2);
+    let dt_3 = dt.powi(3);
+    let q = matrix![
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+        0.0, 0.0, 0.0, 0.0, 0.5 * dt_3, 0.5 * dt_2;
+        0.0, 0.0, 0.0, 0.5 * dt_3, dt_2, dt;
+        0.0, 0.0, 0.0, 0.5 * dt_2, dt, 1e4;
+    ];
+    PHY * q
+}
 
 // MARK: - UART
 fn write(port: &mut Box<dyn serialport::SerialPort>, c: &Control) {
@@ -275,6 +288,8 @@ fn start_ukf_thread(
                     let dt = pre.elapsed().as_secs_f64();
                     pre = std::time::Instant::now();
                     let fx = |x: &_, u| dynamics_short(x, u, dt);
+                    let q = gen_q(dt);
+                    ukf.set_q(q);
                     ukf.predict(u, fx);
                     let hx = |state: &_| {
                         // enable bit が 0 なら 0 にする
