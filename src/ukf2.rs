@@ -93,6 +93,10 @@ impl UnscentedKalmanFilter {
         self.p
     }
 
+    pub fn set_q(&mut self, q: Cov<N>) {
+        self.q = q;
+    }
+
     fn unscented_transform<const S: usize>(
         sigmas: &Sigma<S>,
         wm: &Sigma<1>,
