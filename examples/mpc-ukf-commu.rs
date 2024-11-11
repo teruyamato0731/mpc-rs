@@ -13,8 +13,9 @@ use std::time::Duration;
 // MARK: - Constants
 // 予測ホライゾン
 const T: f64 = 1.2;
-const N: usize = 20;
+const N: usize = 40;
 const DT: f64 = T / N as f64;
+const DUR: f64 = 0.03;
 
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
@@ -22,20 +23,14 @@ const C: na::Matrix4<f64> = matrix![
     0.0, 0.0, 0.0, 0.0;
     0.0, 0.0, 0.0, 0.0;
     0.0, 0.0, 10.0, 0.0;
-    0.0, 0.0, 0.0, 0.0;
+    0.0, 0.0, 0.0, 3.0;
 ];
 
 // UKF
-const PHY: f64 = 0.5;
-const Q: na::SMatrix<f64, 6, 6> = matrix![
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-    0.0, 0.0, 0.0, 0.0, 0.0, 1.6e-2;
-    0.0, 0.0, 0.0, 0.0, 3.3e-2, 0.5;
-    0.0, 0.0, 0.0, 1.6e-2, 0.5, 1e4;
-];
-const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 50.0, 0.2, 0.2];
+const PHY: f64 = 36.0e6;
+const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 20.0, 0.5, 0.5];
+
+const DEBUG: bool = true;
 
 // MARK: - Main
 fn main() {
@@ -88,6 +83,10 @@ fn main() {
             continue;
         }
         pre_u = u_n[0];
+
+        if DEBUG {
+            u_n[0] = 0.0;
+        }
 
         {
             let mut tmp = u_n_mutex.lock().unwrap();
@@ -192,7 +191,8 @@ fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
 fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = na::SMatrix::<f64, 6, 6>::identity() * 10.0;
     let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&R);
-    let obj = UnscentedKalmanFilter::new(*init, p, PHY * Q, r);
+    let q = gen_q(DT);
+    let obj = UnscentedKalmanFilter::new(*init, p, PHY * q, r);
     Arc::new(Mutex::new(obj))
 }
 fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
@@ -208,14 +208,15 @@ fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
 }
 fn gen_q(dt: f64) -> na::SMatrix<f64, 6, 6> {
     let dt_2 = dt.powi(2);
-    let dt_3 = dt.powi(3);
+    let dt_3 = dt_2 * dt;
+    let dt_4 = dt_2.powi(2);
     let q = matrix![
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.5 * dt_3, 0.5 * dt_2;
-        0.0, 0.0, 0.0, 0.5 * dt_3, dt_2, dt;
-        0.0, 0.0, 0.0, 0.5 * dt_2, dt, 1e4;
+        0.0, 0.0       , 0.0       , 0.0       , 0.0       , 0.0;
+        0.0, 0.0       , 0.0       , 0.0       , 0.0       , 0.0;
+        0.0, 0.0       , 0.0       , 0.0       , 0.0       , 0.0;
+        0.0, 0.0       , 0.0       , 0.0       , dt_4 / 8.0, dt_3 / 6.0;
+        0.0, 0.0       , 0.0       , dt_4 / 8.0, dt_3 / 3.0, dt_2 / 2.0;
+        0.0, 0.0       , 0.0       , dt_3 / 6.0, dt_2 / 2.0, dt;
     ];
     PHY * q
 }
@@ -242,7 +243,7 @@ fn solve_control_optimization(
     u_n: &mut na::SVector<f64, N>,
     panoc_cache: &mut PANOCCache,
 ) -> Result<optimization_engine::core::SolverStatus, SolverError> {
-    let max_dur: std::time::Duration = std::time::Duration::from_secs_f64(DT);
+    let max_dur: std::time::Duration = std::time::Duration::from_secs_f64(DUR);
 
     let f = |u: &[f64], c: &mut f64| -> Result<(), SolverError> {
         let u = na::SVectorView::<f64, N>::from_slice(u);
