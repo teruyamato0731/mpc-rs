@@ -77,17 +77,17 @@ fn main() {
             *tmp = u_n;
         }
 
-        print!("\x1b[32mCon: \x1b[m");
-        print!("t: {:5.2} ", start.elapsed().as_secs_f64());
+        print!("\x1b[32mCon:");
+        print!("{:5.2} ", start.elapsed().as_secs_f64());
+        print!("u:{:6.2} ", u_n[0]);
         print!(
-            "est: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
+            "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
             x_est[0],
             x_est[1],
             x_est[2].to_degrees(),
             x_est[3].to_degrees()
         );
-        print!("u: {:6.2} ", u_n[0]);
-        println!();
+        println!("\x1b[m");
     }
 }
 
@@ -298,34 +298,40 @@ fn start_ukf_thread(
                 ukf.update(&x_obs, hx);
                 (ukf.state(), ukf.covariance())
             };
-            print!("\x1b[36mRcv: \x1b[m");
-            print!("t: {:5.2} ", start.elapsed().as_secs_f64());
+            let h = hx(&x_est);
+            let z = (x_obs - h).abs();
+            print!("\x1b[36mRcv:\x1b[m");
+            print!("{:5.2} ", start.elapsed().as_secs_f64());
+            print!("u:{:6.2} ", u);
             print!(
-                "est: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
+                "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
                 x_est[0],
                 x_est[1],
                 x_est[3].to_degrees(),
                 x_est[4].to_degrees()
             );
             print!(
-                "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-                p[(0, 0)],
-                p[(1, 1)],
-                p[(3, 3)],
-                p[(4, 4)],
-            );
-            print!(
-                "x: [{:6.2}, {:5.2}, {:4.0}, {:4.0}] ",
+                "x:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
                 x[0],
                 x[1],
                 x[3].to_degrees(),
                 x[4].to_degrees()
             );
             print!(
-                "obs: [{:6.0}, {:6.0}, {:4.0}, {:5.2}, {:5.2}] ",
+                "o:[{:6.0},{:6.0},{:4.0},{:5.2},{:5.2}] ",
                 x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
             );
-            print!("u: {:6.2} ", u);
+            print!(
+                "z:[{:6.0},{:6.0},{:4.0},{:5.2},{:5.2}] ",
+                z[0], z[1], z[2], z[3], z[4]
+            );
+            print!(
+                "p:[{:6.2},{:5.2},{:5.2},{:5.2}] ",
+                p[(0, 0)],
+                p[(1, 1)],
+                p[(3, 3)],
+                p[(4, 4)],
+            );
             println!();
             // 次の送信まで待機
             thread::sleep(Duration::from_micros(500));
