@@ -11,8 +11,9 @@ use std::time::Duration;
 
 // 予測ホライゾン
 const T: f64 = 1.2;
-const N: usize = 20;
+const N: usize = 40;
 const DT: f64 = T / N as f64;
+const DUR: f64 = 0.03;
 
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
@@ -25,7 +26,7 @@ const C: na::Matrix4<f64> = matrix![
 
 // UKF
 const PHY: f64 = 0.5e6;
-const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 50.0, 0.2, 0.2];
+const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 10.0, 0.5, 0.5];
 
 // MARK: - Main
 fn main() {
@@ -77,17 +78,7 @@ fn main() {
             *tmp = u_n;
         }
 
-        print!("\x1b[32mCon:");
-        print!("{:5.2} ", start.elapsed().as_secs_f64());
-        print!("u:{:6.2} ", u_n[0]);
-        print!(
-            "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
-            x_est[0],
-            x_est[1],
-            x_est[2].to_degrees(),
-            x_est[3].to_degrees()
-        );
-        println!("\x1b[m");
+        print_con(start, &u_n, &x_est);
     }
 }
 
@@ -173,7 +164,7 @@ fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = na::SMatrix::<f64, 6, 6>::identity() * 10.0;
     let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&R);
     let q = gen_q(DT);
-    let obj = UnscentedKalmanFilter::new(*init, p, PHY * q, r);
+    let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
 fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
@@ -219,7 +210,7 @@ fn solve_control_optimization(
     u_n: &mut na::SVector<f64, N>,
     panoc_cache: &mut PANOCCache,
 ) -> Result<optimization_engine::core::SolverStatus, SolverError> {
-    let max_dur: std::time::Duration = std::time::Duration::from_secs_f64(DT);
+    let max_dur: std::time::Duration = std::time::Duration::from_secs_f64(DUR);
 
     let f = |u: &[f64], c: &mut f64| -> Result<(), SolverError> {
         let u = na::SVectorView::<f64, N>::from_slice(u);
@@ -281,7 +272,7 @@ fn start_ukf_thread(
             };
             let x_obs = sensor(&x);
             // センサの遅延
-            thread::sleep(Duration::from_micros(1000));
+            thread::sleep(Duration::from_micros(1500));
             let u = {
                 let u_n = u_n_mutex.lock().unwrap();
                 u_n[0]
@@ -298,45 +289,68 @@ fn start_ukf_thread(
                 ukf.update(&x_obs, hx);
                 (ukf.state(), ukf.covariance())
             };
-            let h = hx(&x_est);
-            let z = (x_obs - h).abs();
-            print!("\x1b[36mRcv:\x1b[m");
-            print!("{:5.2} ", start.elapsed().as_secs_f64());
-            print!("u:{:6.2} ", u);
-            print!(
-                "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
-                x_est[0],
-                x_est[1],
-                x_est[3].to_degrees(),
-                x_est[4].to_degrees()
-            );
-            print!(
-                "x:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
-                x[0],
-                x[1],
-                x[3].to_degrees(),
-                x[4].to_degrees()
-            );
-            print!(
-                "o:[{:6.0},{:6.0},{:4.0},{:5.2},{:5.2}] ",
-                x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
-            );
-            print!(
-                "z:[{:6.0},{:6.0},{:4.0},{:5.2},{:5.2}] ",
-                z[0], z[1], z[2], z[3], z[4]
-            );
-            print!(
-                "p:[{:6.2},{:5.2},{:5.2},{:5.2}] ",
-                p[(0, 0)],
-                p[(1, 1)],
-                p[(3, 3)],
-                p[(4, 4)],
-            );
-            println!();
-            // 次の送信まで待機
-            thread::sleep(Duration::from_micros(500));
+            print_rcv(&x_est, &x_obs, start, u, &x, &p);
         }
     });
+}
+
+// MARK: - Print
+fn print_con(start: std::time::Instant, u_n: &na::SVector<f64, N>, x_est: &na::SVector<f64, 4>) {
+    print!("\x1b[32mCon:");
+    print!("{:5.2} ", start.elapsed().as_secs_f64());
+    print!("u:{:6.2} ", u_n[0]);
+    print!(
+        "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
+        x_est[0],
+        x_est[1],
+        x_est[2].to_degrees(),
+        x_est[3].to_degrees()
+    );
+    println!("\x1b[m");
+}
+fn print_rcv(
+    x_est: &na::SVector<f64, 6>,
+    x_obs: &na::SVector<f64, 5>,
+    start: std::time::Instant,
+    u: f64,
+    x: &na::SVector<f64, 6>,
+    p: &na::SMatrix<f64, 6, 6>,
+) {
+    let h = hx(x_est);
+    let z = (x_obs - h).abs();
+    print!("\x1b[36mRcv:\x1b[m");
+    print!("{:5.2} ", start.elapsed().as_secs_f64());
+    print!("u:{:6.2} ", u);
+    print!(
+        "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
+        x_est[0],
+        x_est[1],
+        x_est[3].to_degrees(),
+        x_est[4].to_degrees()
+    );
+    print!(
+        "x:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
+        x[0],
+        x[1],
+        x[3].to_degrees(),
+        x[4].to_degrees()
+    );
+    print!(
+        "o:[{:6.0},{:6.0},{:4.0},{:5.2},{:5.2}] ",
+        x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
+    );
+    print!(
+        "z:[{:6.0},{:6.0},{:4.0},{:5.2},{:5.2}] ",
+        z[0], z[1], z[2], z[3], z[4]
+    );
+    print!(
+        "p:[{:6.2},{:5.2},{:5.2},{:5.2}] ",
+        p[(0, 0)],
+        p[(1, 1)],
+        p[(3, 3)],
+        p[(4, 4)],
+    );
+    println!();
 }
 
 fn approx_equal(a: f64, b: f64) -> bool {
