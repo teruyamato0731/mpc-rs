@@ -316,6 +316,8 @@ fn start_ukf_thread(
                     let fx = |x: &_, u| dynamics_short(x, u, dt);
                     let q = gen_q(dt);
                     ukf.set_q(q);
+                    let r = gen_r(enable);
+                    ukf.set_r(r);
                     ukf.predict(u, fx);
                     let hx = |state: &_| {
                         // enable bit が 0 なら 0 にする
