@@ -99,7 +99,7 @@ const B: na::Vector4<f64> = matrix![
 // 系ダイナミクスを記述
 const M1: f64 = 160e-3;
 const R_W: f64 = 50e-3;
-const M2: f64 = 2.16 - 2.0 * M1;
+const M2: f64 = 2.4;
 const L: f64 = 0.4; // 重心までの距離
 const J1: f64 = 2.23e5 * 1e-9; // タイヤの慣性モーメント
 const J2: f64 = 1.168e8 * 1e-9; // リポあり
