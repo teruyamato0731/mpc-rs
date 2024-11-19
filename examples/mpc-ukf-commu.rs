@@ -27,7 +27,7 @@ const C: na::Matrix4<f64> = matrix![
 ];
 
 // UKF
-const PHY: f64 = 36.0e6;
+const PHY: na::Vector3<f64> = vector![50.0, 50.0, 10.0];
 const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 20.0, 0.5, 0.5];
 
 const DEBUG: bool = true;
@@ -192,7 +192,7 @@ fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = na::SMatrix::<f64, 6, 6>::identity() * 10.0;
     let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&R);
     let q = gen_q(DT);
-    let obj = UnscentedKalmanFilter::new(*init, p, PHY * q, r);
+    let obj = UnscentedKalmanFilter::new(*init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
 fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
@@ -210,15 +210,40 @@ fn gen_q(dt: f64) -> na::SMatrix<f64, 6, 6> {
     let dt_2 = dt.powi(2);
     let dt_3 = dt_2 * dt;
     let dt_4 = dt_2.powi(2);
-    let q = matrix![
-        0.0, 0.0       , 0.0       , 0.0       , 0.0       , 0.0;
-        0.0, 0.0       , 0.0       , 0.0       , 0.0       , 0.0;
-        0.0, 0.0       , 0.0       , 0.0       , 0.0       , 0.0;
-        0.0, 0.0       , 0.0       , 0.0       , dt_4 / 8.0, dt_3 / 6.0;
-        0.0, 0.0       , 0.0       , dt_4 / 8.0, dt_3 / 3.0, dt_2 / 2.0;
-        0.0, 0.0       , 0.0       , dt_3 / 6.0, dt_2 / 2.0, dt;
+    let q1 = matrix![
+        0.0, 0.0, 0.0, 0.0       , 0.0       , 0.0       ;
+        0.0, 0.0, 0.0, 0.0       , 0.0       , 0.0       ;
+        0.0, 0.0, 0.0, 0.0       , 0.0       , 0.0       ;
+        0.0, 0.0, 0.0, 0.0       , dt_4 / 8.0, dt_3 / 6.0;
+        0.0, 0.0, 0.0, dt_4 / 8.0, dt_3 / 3.0, dt_2 / 2.0;
+        0.0, 0.0, 0.0, dt_3 / 6.0, dt_2 / 2.0, dt        ;
     ];
-    PHY * q
+    let q2 = matrix![
+        0.0, 0.0       , 0.0, 0.0       , 0.0       , 0.0;
+        0.0, 0.0       , 0.0, dt_4 / 8.0, dt_3 / 6.0, 0.0;
+        0.0, 0.0       , 0.0, 0.0       , 0.0       , 0.0;
+        0.0, dt_4 / 8.0, 0.0, dt_3 / 3.0, dt_2 / 2.0, 0.0;
+        0.0, dt_3 / 6.0, 0.0, dt_2 / 2.0, dt        , 0.0;
+        0.0, 0.0       , 0.0, 0.0       , 0.0       , 0.0;
+    ];
+    let q3 = matrix![
+        0.0       , dt_4 / 8.0, dt_3 / 6.0, 0.0, 0.0, 0.0;
+        dt_4 / 8.0, dt_3 / 3.0, dt_2 / 2.0, 0.0, 0.0, 0.0;
+        dt_3 / 6.0, dt_2 / 2.0, dt        , 0.0, 0.0, 0.0;
+        0.0       , 0.0       , 0.0       , 0.0, 0.0, 0.0;
+        0.0       , 0.0       , 0.0       , 0.0, 0.0, 0.0;
+        0.0       , 0.0       , 0.0       , 0.0, 0.0, 0.0;
+    ];
+    PHY[0] * q1 + PHY[1] * q2 + PHY[2] * q3
+}
+fn gen_r(enable: u8) -> na::SMatrix<f64, 5, 5> {
+    let mut r = R;
+    for i in 0..5 {
+        if (enable & (1 << i)) == 0 {
+            r[i] = 1e6;
+        }
+    }
+    na::SMatrix::<f64, 5, 5>::from_diagonal(&r)
 }
 
 // MARK: - UART
@@ -317,11 +342,13 @@ fn start_ukf_thread(
                 );
                 print!("u: {:6.2} ", u);
                 print!(
-                    "p: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                    "p: [{:6.2},{:6.2},{:6.2},{:6.2},{:6.2},{:6.2}] ",
                     p[(0, 0)],
                     p[(1, 1)],
+                    p[(2, 2)],
                     p[(3, 3)],
-                    p[(4, 4)]
+                    p[(4, 4)],
+                    p[(5, 5)],
                 );
                 print_obs(enable, &x_obs);
                 println!();

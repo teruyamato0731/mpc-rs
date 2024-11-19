@@ -25,7 +25,7 @@ const C: na::Matrix4<f64> = matrix![
 ];
 
 // UKF
-const PHY: na::Vector3<f64> = vector![10.0, 10.0, 10.0];
+const PHY: na::Vector3<f64> = vector![50.0, 50.0, 10.0];
 const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 10.0, 0.5, 0.5];
 
 // MARK: - Main
@@ -361,11 +361,13 @@ fn print_rcv(
         z[0], z[1], z[2], z[3], z[4]
     );
     print!(
-        "p:[{:6.2},{:5.2},{:5.2},{:5.2}] ",
+        "p:[{:6.2},{:5.2},{:5.2},{:5.2},{:5.2},{:5.2}] ",
         p[(0, 0)],
         p[(1, 1)],
+        p[(2, 2)],
         p[(3, 3)],
         p[(4, 4)],
+        p[(5, 5)],
     );
     println!();
 }
