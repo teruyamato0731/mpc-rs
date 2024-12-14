@@ -30,7 +30,7 @@ const C: na::Matrix4<f64> = matrix![
 const PHY: na::Vector3<f64> = vector![50.0, 50.0, 10.0];
 const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 20.0, 0.5, 0.5];
 
-const DEBUG: bool = true;
+const DEBUG: bool = false;
 
 // MARK: - Main
 fn main() {
@@ -47,14 +47,14 @@ fn main() {
     let init_u_n = na::SVector::<f64, N>::zeros();
     let u_n_mutex = Arc::new(Mutex::new(init_u_n));
     let init_x = vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let ukf_mutex = init_ukf(&init_x);
+    let ukf_mutex = init_ukf(init_x);
 
     start_ukf_thread(reader, u_n_mutex.clone(), ukf_mutex.clone());
 
     start_logging_thread(u_n_mutex.clone(), ukf_mutex.clone());
 
-    let start = std::time::Instant::now();
     let mut pre_u = 0.0;
+    let start = std::time::Instant::now();
     loop {
         let x_est = {
             let ukf = ukf_mutex.lock().unwrap();
@@ -144,12 +144,12 @@ const G: f64 = 9.81;
 /// モータ定数
 const KT: f64 = 0.15; // m2006 * 2
 /// 分母係数
-const D: f64 = (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) * (M2 * L * L + J2) - M2 * M2 * L * L;
+const D1: f64 = (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) * (M2 * L * L + J2);
+const D: f64 = D1 - M2 * M2 * L * L;
 // 非線形
 fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let mut r = *x;
-    const D: f64 = (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) * (M2 * L * L + J2);
-    let d = D - (M2 * L * x[2].cos()).powi(2);
+    let d = D1 - (M2 * L * x[2].cos()).powi(2);
     r[0] += x[1] * dt;
     r[1] += x[2] * dt;
     let term1 = (M2 * L * L + J2) * M2 * L / d * x[4].powi(2) * x[3].sin();
@@ -201,11 +201,11 @@ fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
 }
 
 // MARK: - UKF
-fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
+fn init_ukf(init: na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
     let p = na::SMatrix::<f64, 6, 6>::identity() * 10.0;
     let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&R);
     let q = gen_q(DT);
-    let obj = UnscentedKalmanFilter::new(*init, p, q, r);
+    let obj = UnscentedKalmanFilter::new(init, p, q, r);
     Arc::new(Mutex::new(obj))
 }
 fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
