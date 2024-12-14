@@ -51,6 +51,8 @@ fn main() {
 
     start_ukf_thread(reader, u_n_mutex.clone(), ukf_mutex.clone());
 
+    start_logging_thread(u_n_mutex.clone(), ukf_mutex.clone());
+
     let start = std::time::Instant::now();
     let mut pre_u = 0.0;
     loop {
@@ -394,4 +396,51 @@ fn print_obs(enable: u8, x_obs: &na::Vector5<f64>) {
     print_obs!("{:6.2} ", x_obs[3], enable & 0b01000);
     print_obs!("{:6.2} ", x_obs[4], enable & 0b10000);
     print!("] ");
+}
+
+// MARK: - Logging
+fn start_logging_thread(
+    u_n_mutex: Arc<Mutex<na::SVector<f64, N>>>,
+    ukf_mutex: Arc<Mutex<UnscentedKalmanFilter>>,
+) {
+    thread::spawn(move || {
+        let mut wtr =
+            csv::Writer::from_path("logs/mpc-ukf-com.csv").expect("Failed to create file");
+        let start = std::time::Instant::now();
+        let mut pre_write = start;
+        loop {
+            // ログの書き込み 10msごと
+            if pre_write.elapsed() > Duration::from_millis(10) {
+                pre_write = std::time::Instant::now();
+
+                let u = {
+                    let u = u_n_mutex.lock().unwrap();
+                    u[0]
+                };
+                let (x_est, p) = {
+                    let ukf = ukf_mutex.lock().unwrap();
+                    (ukf.state(), ukf.covariance())
+                };
+
+                wtr.write_record(&[
+                    start.elapsed().as_secs_f64().to_string(),
+                    u.to_string(),
+                    x_est[0].to_string(),
+                    x_est[1].to_string(),
+                    x_est[2].to_string(),
+                    x_est[3].to_string(),
+                    x_est[4].to_string(),
+                    x_est[5].to_string(),
+                    p[(0, 0)].to_string(),
+                    p[(1, 1)].to_string(),
+                    p[(2, 2)].to_string(),
+                    p[(3, 3)].to_string(),
+                    p[(4, 4)].to_string(),
+                    p[(5, 5)].to_string(),
+                ])
+                .expect("Failed to write record");
+                wtr.flush().expect("Failed to flush");
+            }
+        }
+    });
 }
