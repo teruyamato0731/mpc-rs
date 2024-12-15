@@ -16,8 +16,8 @@ r = 0.05
 L = 0.270
 W = 200e-3
 
-src = "logs/pid.csv"
-dst = f"logs/pid_{d}.csv"
+src = "logs/pid/pid.csv"
+dst = f"logs/pid/pid_{d}.csv"
 shutil.copy2(src, dst)
 
 data_set = np.loadtxt(

@@ -411,7 +411,8 @@ fn start_logging_thread(
     ukf_mutex: Arc<Mutex<UnscentedKalmanFilter>>,
 ) {
     thread::spawn(move || {
-        let mut wtr = csv::Writer::from_path("logs/mpc-ukf.csv").expect("Failed to create file");
+        let mut wtr =
+            csv::Writer::from_path("logs/mpc-ukf/mpc-ukf.csv").expect("Failed to create file");
         let start = std::time::Instant::now();
         let mut pre_write = start;
         loop {

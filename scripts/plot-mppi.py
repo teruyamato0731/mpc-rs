@@ -16,8 +16,8 @@ r = 0.05
 L = 0.270
 W = 200e-3
 
-src = "logs/mppi.csv"
-dst = f"logs/mppi_{d}.csv"
+src = "logs/mppi/mppi.csv"
+dst = f"logs/mppi/mppi_{d}.csv"
 shutil.copy2(src, dst)
 
 data_set = np.loadtxt(

@@ -16,10 +16,10 @@ r = 0.05
 L = 0.270
 W = 200e-3
 
-shutil.copy2("logs/op-mpc-x.csv", f"logs/op-mpc-x_{d}.csv")
+shutil.copy2("logs/op-mpc-x/op-mpc-x.csv", f"logs/op-mpc-x/op-mpc-x_{d}.csv")
 
 data_set = np.loadtxt(
-    fname="logs/op-mpc-x.csv", #読み込むファイルのパスと名前
+    fname="logs/op-mpc-x/op-mpc-x.csv", #読み込むファイルのパスと名前
     dtype="float", #floatで読み込む
     delimiter=",", #csvなのでカンマで区切る
 )

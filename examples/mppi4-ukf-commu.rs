@@ -1,4 +1,5 @@
 extern crate nalgebra as na;
+use chrono::Local;
 use mpc::mppi::Mppi;
 use mpc::packet::{Control, Sensor3 as Sensor};
 use mpc::ukf2::UnscentedKalmanFilter;
@@ -336,8 +337,12 @@ fn start_logging_thread(
     ukf_mutex: Arc<Mutex<UnscentedKalmanFilter>>,
 ) {
     thread::spawn(move || {
-        let mut wtr =
-            csv::Writer::from_path("logs/mpc-ukf-com.csv").expect("Failed to create file");
+        let now = Local::now();
+        let path = format!(
+            "logs/mppi-ukf-com/mppi-ukf-com-{}.csv",
+            now.format("%Y%m%d-%H%M%S")
+        );
+        let mut wtr = csv::Writer::from_path(path).expect("Failed to create file");
         let start = std::time::Instant::now();
         let mut pre_write = start;
         loop {

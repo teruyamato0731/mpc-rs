@@ -44,7 +44,7 @@ fn main() {
     let ukf_mutex2 = ukf_mutex.clone();
 
     // ログファイルの作成
-    let file_path = "logs/mppi.csv";
+    let file_path = "logs/mppi/mppi.csv";
     let mut wtr = csv::Writer::from_path(file_path).expect("file open error");
 
     thread::spawn(move || {

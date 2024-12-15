@@ -9,7 +9,7 @@ fn main() {
     let mut x: Vector4<f64> = vector![-0.5, 0.0, 0.2, 0.0];
 
     // ログファイルの作成
-    let file_path = "logs/pid.csv";
+    let file_path = "logs/pid/pid.csv";
     let mut wtr = csv::Writer::from_path(file_path).expect("file open error");
 
     let mut pid_theta = VelPid::new(PidConfig::new(6e-1, 4e-1, 5e-3).with_limits(-25.0, 25.0));

@@ -20,8 +20,8 @@ r = 0.05
 L = 0.270
 W = 200e-3
 
-src = "logs/mpc-ukf.csv"
-dst = f"logs/mpc-ukf-{d}.csv"
+src = "logs/mpc-ukf/mpc-ukf.csv"
+dst = f"logs/mpc-ukf/mpc-ukf-{d}.csv"
 shutil.copy2(src, dst)
 
 data_set = np.loadtxt(

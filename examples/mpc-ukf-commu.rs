@@ -1,4 +1,5 @@
 extern crate nalgebra as na;
+use chrono::Local;
 use mpc::packet::{Control, Sensor3 as Sensor};
 use mpc::ukf2::UnscentedKalmanFilter;
 use mpc::{create_f_matrix, create_g_matrix, create_q_matrix};
@@ -28,7 +29,7 @@ const C: na::Matrix4<f64> = matrix![
 
 // UKF
 const PHY: na::Vector3<f64> = vector![50.0, 50.0, 10.0];
-const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 20.0, 0.5, 0.5];
+const R: na::SVector<f64, 5> = vector![200.0, 200.0, 20.0, 0.5, 0.5];
 
 const DEBUG: bool = false;
 
@@ -404,8 +405,12 @@ fn start_logging_thread(
     ukf_mutex: Arc<Mutex<UnscentedKalmanFilter>>,
 ) {
     thread::spawn(move || {
-        let mut wtr =
-            csv::Writer::from_path("logs/mpc-ukf-com.csv").expect("Failed to create file");
+        let now = Local::now();
+        let path = format!(
+            "logs/mpc-ukf-com/mpc-ukf-com-{}.csv",
+            now.format("%Y%m%d-%H%M%S")
+        );
+        let mut wtr = csv::Writer::from_path(path).expect("Failed to create file");
         let start = std::time::Instant::now();
         let mut pre_write = start;
         loop {

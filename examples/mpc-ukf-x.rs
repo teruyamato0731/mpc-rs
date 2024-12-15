@@ -265,7 +265,7 @@ fn grad_cost(x: &na::Vector4<f64>, u: &[f64; N], grad: &mut [f64]) {
 }
 
 fn main() -> Result<()> {
-    let file_path = "logs/op-mpc-x.csv";
+    let file_path = "logs/op-mpc-x/op-mpc-x.csv";
     let mut wtr = csv::Writer::from_path(file_path)?;
 
     let tolerance = 1e-6;

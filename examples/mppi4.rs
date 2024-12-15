@@ -33,7 +33,7 @@ fn main() {
     let mut mppi = Mppi::<N, K>::new(dynamics, cost, LAMBDA, R, LIMIT);
 
     // ログファイルの作成
-    let file_path = "logs/mppi.csv";
+    let file_path = "logs/mppi/mppi.csv";
     let mut wtr = csv::Writer::from_path(file_path).expect("file open error");
 
     let now = std::time::Instant::now();
