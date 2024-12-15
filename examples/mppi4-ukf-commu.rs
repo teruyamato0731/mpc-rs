@@ -12,14 +12,14 @@ use std::time::{Duration, Instant};
 
 // MARK: - Constants
 // 予測ホライゾン
-const T: f64 = 0.9;
-const N: usize = 30;
+const T: f64 = 1.2;
+const N: usize = 20;
 const DT: f64 = T / N as f64;
 
 // 制御ホライゾン
-const K: usize = 15e5 as usize;
-const LAMBDA: f64 = 0.5;
-const R_U: f64 = 5.0;
+const K: usize = 8e5 as usize;
+const LAMBDA: f64 = 2.0;
+const R_U: f64 = 2.0;
 
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
@@ -72,13 +72,17 @@ fn main() {
             *u
         };
 
-        if let Ok(u) = mppi.compute(&x_est, &u_n) {
-            u_n = u;
-        } else {
-            u_n = na::SVector::<f64, N>::zeros();
+        match mppi.compute(&x_est, &u_n) {
+            Ok(u) => u_n = u,
+            Err(e) => {
+                eprintln!("Error computing MPPI: {:?}", e);
+                u_n = na::SVector::<f64, N>::zeros();
+            }
         }
 
-        if approx_equal(pre_u, u_n[0]) {
+        u_n[0] = u_n[0].clamp(LIMIT.0, LIMIT.1);
+        if approx_equal(u_n[0], pre_u) {
+            // println!("u_n[0] is not updated");
             continue;
         }
         pre_u = u_n[0];
@@ -148,17 +152,27 @@ fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     r
 }
 fn dynamics(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
-    let r = dynamics_short(&vector![x[0], x[1], x[2], 0.0, x[3], 0.0], u, DT);
-    vector![r[0], r[1], r[2], r[4]]
+    let mut r = *x;
+    let d = D1 - (M2 * L * x[2].cos()).powi(2);
+    r[0] += x[1] * DT;
+    let term1 = (M2 * L * L + J2) * M2 * L / d * x[3].powi(2) * x[2].sin();
+    let term2 = -(M2 * L).powi(2) * G / d * x[2].sin() * x[2].cos();
+    let term3 = 2.0 * (M2 * L * L + J2) / (d * R_W) * KT * u;
+    r[1] += (term1 + term2 + term3) * DT;
+    r[2] += x[3] * DT;
+    let term1 = -(M2 * L).powi(2) / d * x[3].powi(2) * x[2].sin() * x[2].cos();
+    let term2 = M2 * G * L * (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) / d * x[2].sin();
+    let term3 = -2.0 * M2 * L / (d * R_W) * KT * u * x[2].cos();
+    r[3] += (term1 + term2 + term3) * DT;
+    r
 }
 
 // MARK: - MPPI
 fn cost(x: &na::Vector4<f64>) -> f64 {
-    let x_clamped = x[0].clamp(-2.0, 2.0);
-    let term1 = 2.0 * x_clamped.powi(2);
-    let term2 = 3.0 * (x[1] + 2.0 * x_clamped).clamp(-5.0, 5.0).powi(2);
-    let term3 = 5.0 * (x[2] + 0.35 * x[0].clamp(-0.75, 0.75)).powi(2);
-    let term4 = 1.2 * x[3].powi(2);
+    let term1 = 0.0;
+    let term2 = 1.2;
+    let term3 = 3.0 * x[2].powi(2);
+    let term4 = 3.0 * x[3].powi(2);
     term1 + term2 + term3 + term4
 }
 
