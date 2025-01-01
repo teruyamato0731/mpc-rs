@@ -9,7 +9,7 @@ use std::f64::consts::PI;
 use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // MARK: - Constants
 // 予測ホライゾン
@@ -55,7 +55,7 @@ fn main() {
     start_logging_thread(u_n_mutex.clone(), ukf_mutex.clone());
 
     let mut pre_u = 0.0;
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     loop {
         let x_est = {
             let ukf = ukf_mutex.lock().unwrap();
@@ -150,7 +150,7 @@ const D: f64 = D1 - M2 * M2 * L * L;
 // 非線形
 fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let mut r = *x;
-    let d = D1 - (M2 * L * x[2].cos()).powi(2);
+    let d = D1 - (M2 * L * x[3].cos()).powi(2);
     r[0] += x[1] * dt;
     r[1] += x[2] * dt;
     let term1 = (M2 * L * L + J2) * M2 * L / d * x[4].powi(2) * x[3].sin();
@@ -313,7 +313,7 @@ fn start_ukf_thread(
 ) {
     thread::spawn(move || {
         // データが読み込まれるまで待機
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let mut pre = start;
         loop {
             if let Some(s) = read(&mut reader) {
@@ -326,7 +326,7 @@ fn start_ukf_thread(
                     // ロックを取得できるまで待機
                     let mut ukf = ukf_mutex.lock().expect("Failed to lock");
                     let dt = pre.elapsed().as_secs_f64();
-                    pre = std::time::Instant::now();
+                    pre = Instant::now();
                     let fx = |x: &_, u| dynamics_short(x, u, dt);
                     let q = gen_q(dt);
                     ukf.set_q(q);
@@ -411,12 +411,12 @@ fn start_logging_thread(
             now.format("%Y%m%d-%H%M%S")
         );
         let mut wtr = csv::Writer::from_path(path).expect("Failed to create file");
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let mut pre_write = start;
         loop {
             // ログの書き込み 10msごと
             if pre_write.elapsed() > Duration::from_millis(10) {
-                pre_write = std::time::Instant::now();
+                pre_write = Instant::now();
 
                 let u = {
                     let u = u_n_mutex.lock().unwrap();

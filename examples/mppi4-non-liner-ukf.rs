@@ -4,7 +4,11 @@ use mpc::ukf2::UnscentedKalmanFilter;
 use na::{matrix, vector};
 use rand_distr::Distribution;
 use std::f64::consts::PI;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
+// MARK: - Constants
 // 予測ホライゾン
 const T: f64 = 0.8;
 const N: usize = 8;
@@ -14,37 +18,67 @@ const DT: f64 = T / N as f64;
 const K: usize = 15e5 as usize;
 const LAMBDA: f64 = 0.5;
 const R: f64 = 10.0;
+const C: na::Vector4<f64> = vector![0.0, 0.0, 20.0, 1.0];
 
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
 
+// UKF
+const PHY: na::Vector3<f64> = vector![100.0, 70.0, 20.0];
+const R: na::SVector<f64, 5> = vector![500.0, 500.0, 10.0, 0.05, 0.05];
+
+const DEBUG: bool = false;
+const DEBUG_UKF: bool = false;
+
 fn cost(x: &na::Vector4<f64>) -> f64 {
-    let x_clamped = x[0].clamp(-2.0, 2.0);
-    let term1 = 2.0 * x_clamped.powi(2);
-    let term2 = 3.0 * (x[1] + 2.0 * x_clamped).clamp(-5.0, 5.0).powi(2);
-    let term3 = 5.0 * (x[2] + 0.35 * x[0].clamp(-0.75, 0.75)).powi(2);
-    let term4 = 1.2 * x[3].powi(2);
-    term1 + term2 + term3 + term4
+    C[0] * x[0].powi(2) + C[1] * x[1].powi(2) + C[2] * x[2].powi(2) + C[3] * x[3].powi(2)
 }
 
+// MARK: - Main
 fn main() {
-    let mut x = vector![0.5, 0.0, 0.0, 0.1, 0.0, 0.0];
-    let mut u_n = na::SVector::<f64, N>::zeros();
+    let init_x = vector![0.0, 0.0, 0.0, 0.05, 0.0, 0.0];
+    let init_u_n = na::SVector::<f64, N>::zeros();
 
-    let mut mppi = Mppi::<N, K>::new(fx, cost, LAMBDA, R, LIMIT);
-    let mut ukf = init_ukf(&x);
+    let mut mppi = Mppi::<N, K>::new(fx, cost, LAMBDA, R_U, LIMIT);
 
-    // ログファイルの作成
-    let file_path = "logs/mppi/mppi.csv";
-    let mut wtr = csv::Writer::from_path(file_path).expect("file open error");
+    let x_mutex = Arc::new(Mutex::new(init_x));
+    let ukf_mutex = init_ukf(&init_x);
+    let u_n_mutex = Arc::new(Mutex::new(init_u_n));
 
-    let now = std::time::Instant::now();
-    let mut t = 0.0;
-    while t < 10.0 {
-        let x_est = ukf.state();
-        let x_est = vector![x_est[0], x_est[1], x_est[2], x_est[3]];
+    start_dynamics_thread(x_mutex.clone(), u_n_mutex.clone());
 
-        u_n = match mppi.compute(&x_est, &u_n) {
+    start_ukf_thread(x_mutex.clone(), u_n_mutex.clone(), ukf_mutex.clone());
+    start_logging_thread(x_mutex.clone(), u_n_mutex.clone(), ukf_mutex.clone());
+
+    let start = Instant::now();
+    let mut pre_u = 0.0;
+    loop {
+        let x_est = if DEBUG_UKF {
+            let x = x_mutex.lock().unwrap();
+            *x
+        } else {
+            let ukf = ukf_mutex.lock().unwrap();
+            ukf.state()
+        };
+
+        // θの絶対値がpi/2を超えればエラー
+        if x_est[3].abs() > std::f64::consts::PI / 2.0 {
+            println!("x[2] is over pi/2");
+            println!(
+                "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                x_est[0], x_est[1], x_est[2], x_est[3], x_est[4], x_est[5]
+            );
+            println!("elapsed: {:.2} sec", start.elapsed().as_secs_f64());
+            break;
+        }
+        let x_est = vector![x_est[0], x_est[1], x_est[3], x_est[4]];
+
+        let pre_u_n = {
+            let u_n = u_n_mutex.lock().unwrap();
+            *u_n
+        };
+
+        let mut u_n = match mppi.compute(&x_est, &pre_u_n) {
             Ok(u) => u,
             Err(e) => {
                 println!("Failed to compute MPPI: {:?}", e);
@@ -52,74 +86,61 @@ fn main() {
             }
         };
 
-        ukf.predict(u_n[0], dynamics);
-        x = dynamics(&x, u_n[0]);
+        if approx_equal(pre_u, u_n[0]) {
+            continue;
+        }
+        pre_u = u_n[0];
 
-        let x_obs = sensor(&x);
-        ukf.update(&x_obs, hx);
-        let x_est = ukf.state();
-
-        print!("t: {:.2}, u: {:6.2} ", t, u_n[0]);
-        print!(
-            "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-            x[0], x[1], x[3], x[4]
-        );
-        print!(
-            "ob: [{:6.0}, {:6.1}, {:6.1}, {:6.1}, {:6.1}] ",
-            x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
-        );
-        print!(
-            "est: [{:6.2}, {:5.2}, {:5.2}, {:5.2}] ",
-            x_est[0], x_est[1], x_est[3], x_est[4]
-        );
-        println!();
-
-        // θ が 60度 以上になったら終了
-        if x[3].abs() > 60.0f64.to_radians() {
-            println!("x[2] is over 60 degrees");
-            break;
+        if DEBUG {
+            u_n[0] = 0.0;
         }
 
-        wtr.write_record(&[
-            t.to_string(),
-            u_n[0].to_string(),
-            x[0].to_string(),
-            x[1].to_string(),
-            x[3].to_string(),
-            x[4].to_string(),
-        ])
-        .expect("write error");
-        wtr.flush().expect("flush error");
+        {
+            let mut tmp = u_n_mutex.lock().unwrap();
+            *tmp = u_n;
+        }
 
-        t += DT;
+        print_con(start, &u_n, &x_est);
     }
-    println!("elapsed: {:.2} sec", now.elapsed().as_secs_f64());
 }
 
+// MARK: - Dynamics
 // 系ダイナミクスを記述
-const M1: f64 = 150e-3;
+/// 駆動輪の質量
+const M1: f64 = 160e-3;
+/// 駆動輪の半径
 const R_W: f64 = 50e-3;
-const M2: f64 = 2.3 - 2.0 * M1 + 2.0;
-const L: f64 = 0.2474; // 重心までの距離
-const J1: f64 = M1 * R_W * R_W;
-const J2: f64 = 0.2;
+/// 振り子の質量
+const M2: f64 = 2.4;
+/// 振り子の長さ
+const L: f64 = 0.4;
+/// タイヤの慣性モーメント
+const J1: f64 = 2.23e5 * 1e-9;
+/// 振り子の慣性モーメント
+const J2: f64 = 1.168e8 * 1e-9;
+/// 重力加速度
 const G: f64 = 9.81;
-const KT: f64 = 0.3; // m3508
-const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2);
-fn dynamics(x: &na::Vector6<f64>, u: f64) -> na::Vector6<f64> {
+/// モータ定数
+const KT: f64 = 0.15; // m2006 * 2
+/// 分母係数
+const D1: f64 = (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) * (M2 * L * L + J2);
+const D: f64 = D1 - M2 * M2 * L * L;
+// 非線形
+fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let mut r = *x;
-    const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2);
-    let d = D - (M2 * L * x[2].cos()).powi(2);
-    r[0] += x[1] * DT;
-    r[1] += x[2] * DT;
-    let term3 = (J2 + M2 * L * L) * (KT * u / R_W + M2 * L * x[4].powi(2) * x[3].sin());
-    let term4 = M2 * G * L * L * x[3].sin() * x[3].cos();
-    r[2] = (term3 + term4) / d;
-    r[3] += x[4] * DT;
-    r[4] += x[5] * DT;
-    let term1 = (M1 + M2 + J1 / (R_W * R_W)) * M2 * G * L * x[3].sin();
-    let term2 = (KT * u / R_W + M2 * L * x[4].powi(2) * x[3].sin()) * M2 * L * x[3].cos();
-    r[5] = (term1 - term2) / d;
+    let d = D1 - (M2 * L * x[3].cos()).powi(2);
+    r[0] += x[1] * dt;
+    r[1] += x[2] * dt;
+    let term1 = (M2 * L * L + J2) * M2 * L / d * x[4].powi(2) * x[3].sin();
+    let term2 = -(M2 * L).powi(2) * G / d * x[3].sin() * x[3].cos();
+    let term3 = 2.0 * (M2 * L * L + J2) / (d * R_W) * KT * u;
+    r[2] = term1 + term2 + term3;
+    r[3] += x[4] * dt;
+    r[4] += x[5] * dt;
+    let term1 = -(M2 * L).powi(2) / d * x[4].powi(2) * x[3].sin() * x[3].cos();
+    let term2 = M2 * G * L * (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) / d * x[3].sin();
+    let term3 = -2.0 * M2 * L / (d * R_W) * KT * u * x[3].cos();
+    r[5] = term1 + term2 + term3;
     r
 }
 fn fx(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
@@ -136,54 +157,255 @@ fn fx(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
     r
 }
 
-fn init_ukf(init: &na::Vector6<f64>) -> UnscentedKalmanFilter {
-    let p = matrix![
-        3.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 3.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 3.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 3.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 3.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.0, 3.0;
-    ];
-    let q = matrix![
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.05;
-        0.0, 0.0, 0.0, 0.0, 0.05, 5.0;
-    ];
-    let r = matrix![
-        500.0, 0.0, 0.0, 0.0, 0.0;
-        0.0, 500.0, 0.0, 0.0, 0.0;
-        0.0, 0.0, 10.0, 0.0, 0.0;
-        0.0, 0.0, 0.0, 5.0, 0.0;
-        0.0, 0.0, 0.0, 0.0, 5.0;
-    ];
-    UnscentedKalmanFilter::new(*init, p, q, r)
+// MARK: - UKF
+fn init_ukf(init: &na::Vector6<f64>) -> Arc<Mutex<UnscentedKalmanFilter>> {
+    let p = na::SMatrix::<f64, 6, 6>::identity() * 10.0;
+    let r = na::SMatrix::<f64, 5, 5>::from_diagonal(&R);
+    let q = gen_q(DT);
+    let obj = UnscentedKalmanFilter::new(*init, p, q, r);
+    Arc::new(Mutex::new(obj))
 }
-
+fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
+    let ax = G * state[3].sin() + state[2] * state[3].cos() + L * state[5];
+    let az = G * state[3].cos() - state[2] * state[3].sin() + L * state[4].powi(2);
+    vector![
+        36.0 * 60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
+        36.0 * -60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
+        state[4].to_degrees(),                     // 角速度 [rad/s] -> [deg/s]
+        az / G,                                    // 垂直方向の力 [m/s^2] -> [G]
+        ax / G,                                    // 水平方向の力 [m/s^2] -> [G]
+    ]
+}
 fn sensor(x: &na::Vector6<f64>) -> na::Vector5<f64> {
     let mut rng = rand::thread_rng();
     let dist = rand_distr::Normal::<f64>::new(0.0, 1.0).unwrap();
     let noise = vector![
-        100.0 * dist.sample(&mut rng),
-        100.0 * dist.sample(&mut rng),
-        0.5 * dist.sample(&mut rng),
-        5.0 * dist.sample(&mut rng),
-        5.0 * dist.sample(&mut rng),
+        R[0] * dist.sample(&mut rng),
+        R[1] * dist.sample(&mut rng),
+        R[2] * dist.sample(&mut rng),
+        R[3] * dist.sample(&mut rng),
+        R[4] * dist.sample(&mut rng),
     ];
     hx(x) + noise
 }
+fn gen_q(dt: f64) -> na::SMatrix<f64, 6, 6> {
+    let dt_2 = dt.powi(2);
+    let dt_3 = dt_2 * dt;
+    let dt_4 = dt_2.powi(2);
+    let q1 = matrix![
+        0.0, 0.0, 0.0, 0.0       , 0.0       , 0.0       ;
+        0.0, 0.0, 0.0, 0.0       , 0.0       , 0.0       ;
+        0.0, 0.0, 0.0, 0.0       , 0.0       , 0.0       ;
+        0.0, 0.0, 0.0, 0.0       , dt_4 / 8.0, dt_3 / 6.0;
+        0.0, 0.0, 0.0, dt_4 / 8.0, dt_3 / 3.0, dt_2 / 2.0;
+        0.0, 0.0, 0.0, dt_3 / 6.0, dt_2 / 2.0, dt        ;
+    ];
+    let q2 = matrix![
+        0.0, 0.0       , 0.0, 0.0       , 0.0       , 0.0;
+        0.0, 0.0       , 0.0, dt_4 / 8.0, dt_3 / 6.0, 0.0;
+        0.0, 0.0       , 0.0, 0.0       , 0.0       , 0.0;
+        0.0, dt_4 / 8.0, 0.0, dt_3 / 3.0, dt_2 / 2.0, 0.0;
+        0.0, dt_3 / 6.0, 0.0, dt_2 / 2.0, dt        , 0.0;
+        0.0, 0.0       , 0.0, 0.0       , 0.0       , 0.0;
+    ];
+    let q3 = matrix![
+        0.0       , dt_4 / 8.0, dt_3 / 6.0, 0.0, 0.0, 0.0;
+        dt_4 / 8.0, dt_3 / 3.0, dt_2 / 2.0, 0.0, 0.0, 0.0;
+        dt_3 / 6.0, dt_2 / 2.0, dt        , 0.0, 0.0, 0.0;
+        0.0       , 0.0       , 0.0       , 0.0, 0.0, 0.0;
+        0.0       , 0.0       , 0.0       , 0.0, 0.0, 0.0;
+        0.0       , 0.0       , 0.0       , 0.0, 0.0, 0.0;
+    ];
+    PHY[0] * q1 + PHY[1] * q2 + PHY[2] * q3
+}
 
-fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
-    let v = M2 * G * state[3].cos() + M2 * state[2] * state[3].sin() - M2 * L * state[4].powi(2);
-    let h = -M2 * G * state[3].sin() + M2 * state[2] * state[3].cos() + M2 * L * state[5];
-    vector![
-        60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
-        60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
-        state[3].to_degrees(),              // 角速度 [rad/s] -> [deg/s]
-        v / G,                              // 垂直方向の力 [N] -> [G]
-        h / G,                              // 水平方向の力 [N] -> [G]
-    ]
+// MARK: - App
+fn start_dynamics_thread(
+    x_mutex: Arc<Mutex<na::Vector6<f64>>>,
+    u_n_mutex: Arc<Mutex<na::SVector<f64, N>>>,
+) {
+    thread::spawn(move || {
+        let start = Instant::now();
+        let mut pre = start;
+        loop {
+            {
+                let u = {
+                    let u_n = u_n_mutex.lock().unwrap();
+                    u_n[0]
+                };
+                let mut x = x_mutex.lock().unwrap();
+                *x = dynamics_short(&x, u, pre.elapsed().as_secs_f64());
+            }
+            pre = Instant::now();
+        }
+    });
+}
+
+fn start_ukf_thread(
+    x: Arc<Mutex<na::Vector6<f64>>>,
+    u_n_mutex: Arc<Mutex<na::SVector<f64, N>>>,
+    ukf_mutex: Arc<Mutex<UnscentedKalmanFilter>>,
+) {
+    thread::spawn(move || {
+        // データが読み込まれるまで待機
+        let start = Instant::now();
+        let mut pre = start;
+        loop {
+            let x = {
+                // ロックを取得できるまで待機
+                let x = x.lock().expect("Failed to lock");
+                *x
+            };
+            let x_obs = sensor(&x);
+            // センサの遅延
+            thread::sleep(Duration::from_millis(9));
+            let u = {
+                let u_n = u_n_mutex.lock().unwrap();
+                u_n[0]
+            };
+            let (x_est, p) = {
+                // ロックを取得できるまで待機
+                let mut ukf = ukf_mutex.lock().expect("Failed to lock");
+                let dt = pre.elapsed().as_secs_f64();
+                pre = Instant::now();
+                let fx = |x: &_, u: f64| dynamics_short(x, u, dt);
+                let q = gen_q(dt);
+                ukf.set_q(q);
+                ukf.predict(u, fx);
+                ukf.update(&x_obs, hx);
+                // let result = ukf.update_with_gate(&x_obs, hx, gating_acc);
+                (ukf.state(), ukf.covariance())
+            };
+            print_rcv(&x_est, &x_obs, start, u, &x, &p);
+        }
+    });
+}
+
+// MARK: - Print
+fn print_con(start: Instant, u_n: &na::SVector<f64, N>, x_est: &na::SVector<f64, 4>) {
+    print!("\x1b[32mCon:");
+    print!("{:6.2} ", start.elapsed().as_secs_f64());
+    print!("u:{:6.2} ", u_n[0]);
+    print!(
+        "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
+        x_est[0],
+        x_est[1],
+        x_est[2].to_degrees(),
+        x_est[3].to_degrees()
+    );
+    println!("\x1b[m");
+}
+fn print_rcv(
+    x_est: &na::SVector<f64, 6>,
+    x_obs: &na::SVector<f64, 5>,
+    start: Instant,
+    u: f64,
+    x: &na::SVector<f64, 6>,
+    p: &na::SMatrix<f64, 6, 6>,
+) {
+    let h = hx(x_est);
+    let z = x_obs - h;
+    print!("\x1b[36mRcv:\x1b[m");
+    print!("{:6.2} ", start.elapsed().as_secs_f64());
+    print!("u:{:6.2} ", u);
+    print!(
+        "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
+        x_est[0],
+        x_est[1],
+        x_est[3].to_degrees(),
+        x_est[4].to_degrees()
+    );
+    print!(
+        "x:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
+        x[0],
+        x[1],
+        x[3].to_degrees(),
+        x[4].to_degrees()
+    );
+    print!(
+        "o:[{:6.0},{:6.0},{:4.0},{:5.2},{:5.2}] ",
+        x_obs[0], x_obs[1], x_obs[2], x_obs[3], x_obs[4]
+    );
+    print!(
+        "z:[{:6.0},{:6.0},{:4.0},{:5.2},{:5.2}] ",
+        z[0], z[1], z[2], z[3], z[4]
+    );
+    print!(
+        "p:[{:6.2},{:5.2},{:5.2},{:5.2},{:5.2},{:5.2}] ",
+        p[(0, 0)],
+        p[(1, 1)],
+        p[(2, 2)],
+        p[(3, 3)],
+        p[(4, 4)],
+        p[(5, 5)],
+    );
+    println!();
+}
+
+fn approx_equal(a: f64, b: f64) -> bool {
+    let epsilon = 1e-2;
+    (a - b).abs() < epsilon
+}
+
+// MARK: - Log
+fn write(
+    wtr: &mut csv::Writer<std::fs::File>,
+    t: f64,
+    u: f64,
+    x: na::Vector6<f64>,
+    x_est: na::Vector6<f64>,
+) -> Result<(), csv::Error> {
+    wtr.write_record(&[
+        t.to_string(),
+        u.to_string(),
+        x[0].to_string(),
+        x[1].to_string(),
+        x[2].to_string(),
+        x[3].to_string(),
+        x[4].to_string(),
+        x[5].to_string(),
+        x_est[0].to_string(),
+        x_est[1].to_string(),
+        x_est[2].to_string(),
+        x_est[3].to_string(),
+        x_est[4].to_string(),
+        x_est[5].to_string(),
+    ])?;
+    wtr.flush()?;
+    Ok(())
+}
+
+fn start_logging_thread(
+    x_mutex: Arc<Mutex<na::Vector6<f64>>>,
+    u_n_mutex: Arc<Mutex<na::SVector<f64, N>>>,
+    ukf_mutex: Arc<Mutex<UnscentedKalmanFilter>>,
+) {
+    thread::spawn(move || {
+        let file_path = "logs/mppi/mppi.csv";
+        let mut wtr = csv::Writer::from_path(file_path).expect("Failed to create file");
+        let start = Instant::now();
+        let mut pre_write = start;
+        loop {
+            // ログの書き込み 一定周期ごと
+            if pre_write.elapsed() > Duration::from_millis(30) {
+                pre_write = Instant::now();
+
+                let u = {
+                    let u = u_n_mutex.lock().unwrap();
+                    u[0]
+                };
+                let x = {
+                    let x = x_mutex.lock().unwrap();
+                    *x
+                };
+                let x_est = {
+                    let ukf = ukf_mutex.lock().unwrap();
+                    ukf.state()
+                };
+
+                write(&mut wtr, start.elapsed().as_secs_f64(), u, x, x_est)
+                    .expect("Failed to write");
+            }
+        }
+    });
 }

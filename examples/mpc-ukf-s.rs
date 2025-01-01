@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+// MARK: - Constants
 // 予測ホライゾン
 const T: f64 = 1.2;
 const N: usize = 40;
@@ -25,8 +26,12 @@ const C: na::Matrix4<f64> = matrix![
 ];
 
 // UKF
-const PHY: na::Vector3<f64> = vector![50.0, 50.0, 10.0];
-const R: na::SVector<f64, 5> = vector![1500.0, 1500.0, 10.0, 0.5, 0.5];
+const PHY: na::Vector3<f64> = vector![100.0, 70.0, 20.0];
+const R: na::SVector<f64, 5> = vector![500.0, 500.0, 10.0, 0.05, 0.05];
+// const GATE: f64 = 4.5;
+
+const DEBUG: bool = false;
+const DEBUG_UKF: bool = false;
 
 // MARK: - Main
 fn main() {
@@ -45,20 +50,28 @@ fn main() {
     start_ukf_thread(x_mutex.clone(), u_n_mutex.clone(), ukf_mutex.clone());
     start_logging_thread(x_mutex.clone(), u_n_mutex.clone(), ukf_mutex.clone());
 
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let mut pre_u = 0.0;
     loop {
-        let x_est = {
+        let x_est = if DEBUG_UKF {
+            let x = x_mutex.lock().unwrap();
+            *x
+        } else {
             let ukf = ukf_mutex.lock().unwrap();
             ukf.state()
         };
-        let x_est = vector![x_est[0], x_est[1], x_est[3], x_est[4]];
 
         // θの絶対値がpi/2を超えればエラー
-        if x_est[2].abs() > std::f64::consts::PI / 2.0 {
-            println!("θ is over pi/2");
+        if x_est[3].abs() > std::f64::consts::PI / 2.0 {
+            println!("x[2] is over pi/2");
+            println!(
+                "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}] ",
+                x_est[0], x_est[1], x_est[2], x_est[3], x_est[4], x_est[5]
+            );
+            println!("elapsed: {:.2} sec", start.elapsed().as_secs_f64());
             break;
         }
+        let x_est = vector![x_est[0], x_est[1], x_est[3], x_est[4]];
 
         let mut u_n = {
             let u_n = u_n_mutex.lock().unwrap();
@@ -72,6 +85,10 @@ fn main() {
             continue;
         }
         pre_u = u_n[0];
+
+        if DEBUG {
+            u_n[0] = 0.0;
+        }
 
         {
             let mut tmp = u_n_mutex.lock().unwrap();
@@ -87,40 +104,51 @@ const A: na::Matrix4<f64> = matrix![
     1.0, DT, 0.0, 0.0;
     0.0, 1.0, -M2 * M2 * G * L * L / D * DT, 0.0;
     0.0, 0.0, 1.0, DT;
-    0.0, 0.0, (M1 + M2 + J1 / (R_W * R_W)) / D * M2 * G * L * DT, 1.0
+    0.0, 0.0, (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) * M2 * G * L / D * DT, 1.0
 ];
 const B: na::Vector4<f64> = matrix![
     0.0;
-    (M2 * L * L + J2) / D / R_W * KT * DT;
+    2.0 * (M2 * L * L + J2) / (D * R_W) * KT * DT;
     0.0;
-    -M2 * L / D / R_W * KT * DT;
+    -2.0 * M2 * L / (D * R_W) * KT * DT;
 ];
 
 // 系ダイナミクスを記述
+/// 駆動輪の質量
 const M1: f64 = 160e-3;
+/// 駆動輪の半径
 const R_W: f64 = 50e-3;
+/// 振り子の質量
 const M2: f64 = 2.4;
-const L: f64 = 0.4; // 重心までの距離
-const J1: f64 = 2.23e5 * 1e-9; // タイヤの慣性モーメント
-const J2: f64 = 1.168e8 * 1e-9; // リポあり
+/// 振り子の長さ
+const L: f64 = 0.4;
+/// タイヤの慣性モーメント
+const J1: f64 = 2.23e5 * 1e-9;
+/// 振り子の慣性モーメント
+const J2: f64 = 1.168e8 * 1e-9;
+/// 重力加速度
 const G: f64 = 9.81;
+/// モータ定数
 const KT: f64 = 0.15; // m2006 * 2
-const D: f64 = (M1 + 0.5 * M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2) - 0.5 * M2 * M2 * L * L;
+/// 分母係数
+const D1: f64 = (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) * (M2 * L * L + J2);
+const D: f64 = D1 - M2 * M2 * L * L;
 // 非線形
 fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let mut r = *x;
-    const D: f64 = (M1 + M2 + J1 / (R_W * R_W)) * (M2 * L * L + J2);
-    let d = D - 0.5 * (M2 * L * x[2].cos()).powi(2);
+    let d = D1 - (M2 * L * x[3].cos()).powi(2);
     r[0] += x[1] * dt;
     r[1] += x[2] * dt;
-    let term3 = (J2 + M2 * L * L) * (KT * u / R_W + M2 * L * x[4].powi(2) * x[3].sin());
-    let term4 = 0.5 * M2 * G * L * L * x[3].sin() * x[3].cos();
-    r[2] = (term3 + term4) / d;
+    let term1 = (M2 * L * L + J2) * M2 * L / d * x[4].powi(2) * x[3].sin();
+    let term2 = -(M2 * L).powi(2) * G / d * x[3].sin() * x[3].cos();
+    let term3 = 2.0 * (M2 * L * L + J2) / (d * R_W) * KT * u;
+    r[2] = term1 + term2 + term3;
     r[3] += x[4] * dt;
     r[4] += x[5] * dt;
-    let term1 = (M1 + 0.5 * M2 + J1 / (R_W * R_W)) * M2 * G * L * x[3].sin();
-    let term2 = (KT * u / R_W + 0.5 * M2 * L * x[4].powi(2) * x[3].sin()) * M2 * L * x[3].cos();
-    r[5] = (term1 - term2) / d;
+    let term1 = -(M2 * L).powi(2) / d * x[4].powi(2) * x[3].sin() * x[3].cos();
+    let term2 = M2 * G * L * (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) / d * x[3].sin();
+    let term3 = -2.0 * M2 * L / (d * R_W) * KT * u * x[3].cos();
+    r[5] = term1 + term2 + term3;
     r
 }
 
@@ -256,7 +284,7 @@ fn start_dynamics_thread(
     u_n_mutex: Arc<Mutex<na::SVector<f64, N>>>,
 ) {
     thread::spawn(move || {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let mut pre = start;
         loop {
             {
@@ -267,7 +295,7 @@ fn start_dynamics_thread(
                 let mut x = x_mutex.lock().unwrap();
                 *x = dynamics_short(&x, u, pre.elapsed().as_secs_f64());
             }
-            pre = std::time::Instant::now();
+            pre = Instant::now();
         }
     });
 }
@@ -279,7 +307,7 @@ fn start_ukf_thread(
 ) {
     thread::spawn(move || {
         // データが読み込まれるまで待機
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let mut pre = start;
         loop {
             let x = {
@@ -289,7 +317,7 @@ fn start_ukf_thread(
             };
             let x_obs = sensor(&x);
             // センサの遅延
-            thread::sleep(Duration::from_micros(1500));
+            thread::sleep(Duration::from_millis(9));
             let u = {
                 let u_n = u_n_mutex.lock().unwrap();
                 u_n[0]
@@ -298,7 +326,7 @@ fn start_ukf_thread(
                 // ロックを取得できるまで待機
                 let mut ukf = ukf_mutex.lock().expect("Failed to lock");
                 let dt = pre.elapsed().as_secs_f64();
-                pre = std::time::Instant::now();
+                pre = Instant::now();
                 let fx = |x: &_, u: f64| dynamics_short(x, u, dt);
                 let q = gen_q(dt);
                 ukf.set_q(q);
@@ -312,9 +340,9 @@ fn start_ukf_thread(
 }
 
 // MARK: - Print
-fn print_con(start: std::time::Instant, u_n: &na::SVector<f64, N>, x_est: &na::SVector<f64, 4>) {
+fn print_con(start: Instant, u_n: &na::SVector<f64, N>, x_est: &na::SVector<f64, 4>) {
     print!("\x1b[32mCon:");
-    print!("{:5.2} ", start.elapsed().as_secs_f64());
+    print!("{:6.2} ", start.elapsed().as_secs_f64());
     print!("u:{:6.2} ", u_n[0]);
     print!(
         "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
@@ -328,15 +356,15 @@ fn print_con(start: std::time::Instant, u_n: &na::SVector<f64, N>, x_est: &na::S
 fn print_rcv(
     x_est: &na::SVector<f64, 6>,
     x_obs: &na::SVector<f64, 5>,
-    start: std::time::Instant,
+    start: Instant,
     u: f64,
     x: &na::SVector<f64, 6>,
     p: &na::SMatrix<f64, 6, 6>,
 ) {
     let h = hx(x_est);
-    let z = (x_obs - h).abs();
+    let z = x_obs - h;
     print!("\x1b[36mRcv:\x1b[m");
-    print!("{:5.2} ", start.elapsed().as_secs_f64());
+    print!("{:6.2} ", start.elapsed().as_secs_f64());
     print!("u:{:6.2} ", u);
     print!(
         "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
@@ -413,12 +441,12 @@ fn start_logging_thread(
     thread::spawn(move || {
         let mut wtr =
             csv::Writer::from_path("logs/mpc-ukf/mpc-ukf.csv").expect("Failed to create file");
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let mut pre_write = start;
         loop {
-            // ログの書き込み 100msごと
-            if pre_write.elapsed() > Duration::from_millis(100) {
-                pre_write = std::time::Instant::now();
+            // ログの書き込み 一定周期ごと
+            if pre_write.elapsed() > Duration::from_millis(30) {
+                pre_write = Instant::now();
 
                 let u = {
                     let u = u_n_mutex.lock().unwrap();
