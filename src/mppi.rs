@@ -46,13 +46,11 @@ impl<const N: usize, const K: usize> Mppi<N, K> {
             .collect::<Vec<_>>();
 
         // 並列処理でコスト・重みの計算を行う
-        let mut c_k = vec![0.0; K];
         let mut w_k = vec![0.0; K];
         let sum: f64 = v_k_n
             .par_iter()
-            .zip(c_k.par_iter_mut())
             .zip(w_k.par_iter_mut())
-            .map(|((v_k, c_i), w_i)| {
+            .map(|(v_k, w_i)| {
                 // コストの計算
                 let (cost, _) = v_k.iter().fold((0.0, *x), |(c, x_c), v| {
                     // 状態の更新
@@ -60,7 +58,6 @@ impl<const N: usize, const K: usize> Mppi<N, K> {
                     // コストの累積
                     (c + (self.cost)(&x_n), x_n)
                 });
-                *c_i = cost;
                 // 重みの計算
                 let cost_term = cost / self.lambda;
                 let control_term = u_n
@@ -79,7 +76,7 @@ impl<const N: usize, const K: usize> Mppi<N, K> {
         let u_n = w_k
             .par_iter()
             .zip(v_k_n.par_iter())
-            .map(|(w, v_k)| *w * v_k / sum)
+            .map(|(w, v_k)| *w / sum * v_k)
             .reduce(na::SVector::<f64, N>::zeros, |acc, x| acc + x);
 
         // u が 不正値の場合は終了
