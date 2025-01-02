@@ -46,6 +46,12 @@ DT = data_set[1, 0] - data_set[0, 0]
 # 11列目が x_est[3] = θ_est
 # 12列目が x_est[4] = θ'_est
 # 13列目が x_est[5] = θ''_est
+# 14列目が x_pred[0] = x_pred
+# 15列目が x_pred[1] = x'_pred
+# 16列目が x_pred[2] = x''_pred
+# 17列目が x_pred[3] = θ_pred
+# 18列目が x_pred[4] = θ'_pred
+# 19列目が x_pred[5] = θ''_pred
 
 fig, (ax, ax2, ax3) = plt.subplots(3, 1)
 fig.subplots_adjust(left=0.2, right=0.8)
@@ -60,6 +66,10 @@ ax.add_patch(c)
 ax.add_patch(con)
 ax.add_patch(rect)
 ax.add_patch(con_est)
+
+# 予測値
+con_pred = patches.ConnectionPatch((0, 0), (1, 1), coordsA='data', linewidth=3, ec='r', fc='w', linestyle=':', label="pred")
+ax.add_patch(con_pred)
 
 ax.legend()
 
@@ -122,6 +132,11 @@ def update_anim(step, _step_max):
     theta_est = data_set[step, 11]
     con_est.xy1 = data_set[step, 8], 0
     con_est.xy2 = data_set[step, 8] + L * np.sin(theta_est), L * np.cos(theta_est)
+
+    # 予測値
+    theta_pred = data_set[step, 17]
+    con_pred.xy1 = data_set[step, 14], 0
+    con_pred.xy2 = data_set[step, 14] + L * np.sin(theta_pred), L * np.cos(theta_pred)
 
     line.set_xdata([data_set[step, 0], data_set[step, 0]])
     line2.set_xdata([data_set[step, 0], data_set[step, 0]])

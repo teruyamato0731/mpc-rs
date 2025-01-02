@@ -354,6 +354,7 @@ fn write(
     u: f64,
     x: na::Vector6<f64>,
     x_est: na::Vector6<f64>,
+    x_pred: na::Vector6<f64>,
 ) -> Result<(), csv::Error> {
     wtr.write_record(&[
         t.to_string(),
@@ -370,6 +371,12 @@ fn write(
         x_est[3].to_string(),
         x_est[4].to_string(),
         x_est[5].to_string(),
+        x_pred[0].to_string(),
+        x_pred[1].to_string(),
+        x_pred[2].to_string(),
+        x_pred[3].to_string(),
+        x_pred[4].to_string(),
+        x_pred[5].to_string(),
     ])?;
     wtr.flush()?;
     Ok(())
@@ -390,9 +397,9 @@ fn start_logging_thread(
             if pre_write.elapsed() > Duration::from_millis(30) {
                 pre_write = Instant::now();
 
-                let u = {
-                    let u = u_n_mutex.lock().unwrap();
-                    u[0]
+                let u_n = {
+                    let u_n = u_n_mutex.lock().unwrap();
+                    u_n
                 };
                 let x = {
                     let x = x_mutex.lock().unwrap();
@@ -403,8 +410,20 @@ fn start_logging_thread(
                     ukf.state()
                 };
 
-                write(&mut wtr, start.elapsed().as_secs_f64(), u, x, x_est)
-                    .expect("Failed to write");
+                let mut x_pred = x_est;
+                for i in 0..N {
+                    x_pred = dynamics_short(&x_pred, u_n[i], DT);
+                }
+
+                write(
+                    &mut wtr,
+                    start.elapsed().as_secs_f64(),
+                    u_n[0],
+                    x,
+                    x_est,
+                    x_pred,
+                )
+                .expect("Failed to write");
             }
         }
     });
