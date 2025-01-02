@@ -1,4 +1,5 @@
 use rand::prelude::*;
+use rand_xoshiro::Xoshiro256Plus;
 use rayon::prelude::*;
 
 // MPPI (Model Predictive Path Integral) controller
@@ -37,11 +38,9 @@ impl<const N: usize, const K: usize> Mppi<N, K> {
         let dist = rand_distr::Normal::<f64>::new(0.0, self.std_dev).unwrap();
         let v_k_n = (0..K)
             .into_par_iter()
-            .map(|_| {
-                let mut rng = rand::thread_rng();
-                u_n + na::SVector::<f64, N>::from_fn(|_, _| {
-                    dist.sample(&mut rng).clamp(self.limit.0, self.limit.1)
-                })
+            .map_init(Xoshiro256Plus::from_entropy, |rng, _| {
+                (u_n + na::SVector::<f64, N>::from_distribution(&dist, rng))
+                    .map(|v| v.clamp(self.limit.0, self.limit.1))
             })
             .collect::<Vec<_>>();
 
