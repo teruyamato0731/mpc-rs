@@ -10,15 +10,15 @@ use std::time::{Duration, Instant};
 
 // MARK: - Constants
 // 予測ホライゾン
-const T: f64 = 0.8;
-const N: usize = 8;
+const T: f64 = 1.2;
+const N: usize = 12;
 const DT: f64 = T / N as f64;
 
 // 制御ホライゾン
-const K: usize = 15e5 as usize;
-const LAMBDA: f64 = 0.5;
-const R: f64 = 10.0;
-const C: na::Vector4<f64> = vector![0.0, 0.0, 20.0, 1.0];
+const K: usize = 1e5 as usize;
+const LAMBDA: f64 = 2.0;
+const R_U: f64 = 4.0;
+const C: na::Vector6<f64> = vector![0.0, 0.0, 0.0, 1.0, 0.8, 0.0];
 
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
@@ -28,18 +28,23 @@ const PHY: na::Vector3<f64> = vector![100.0, 70.0, 20.0];
 const R: na::SVector<f64, 5> = vector![500.0, 500.0, 10.0, 0.05, 0.05];
 
 const DEBUG: bool = false;
-const DEBUG_UKF: bool = false;
+const DEBUG_UKF: bool = true;
 
-fn cost(x: &na::Vector4<f64>) -> f64 {
-    C[0] * x[0].powi(2) + C[1] * x[1].powi(2) + C[2] * x[2].powi(2) + C[3] * x[3].powi(2)
+fn cost(x: &na::Vector6<f64>) -> f64 {
+    C[0] * x[0].powi(2)
+        + C[1] * x[1].powi(2)
+        + C[2] * x[2].powi(2)
+        + C[3] * x[3].powi(2)
+        + C[4] * x[4].powi(2)
+        + C[5] * x[5].powi(2)
 }
 
 // MARK: - Main
 fn main() {
-    let init_x = vector![0.0, 0.0, 0.0, 0.05, 0.0, 0.0];
+    let init_x = vector![0.0, 0.0, 0.0, 0.1, 0.0, 0.0];
     let init_u_n = na::SVector::<f64, N>::zeros();
 
-    let mut mppi = Mppi::<N, K>::new(fx, cost, LAMBDA, R_U, LIMIT);
+    let mut mppi = Mppi::<N, K, 6>::new(rk4, cost, LAMBDA, R_U, LIMIT);
 
     let x_mutex = Arc::new(Mutex::new(init_x));
     let ukf_mutex = init_ukf(&init_x);
@@ -51,7 +56,6 @@ fn main() {
     start_logging_thread(x_mutex.clone(), u_n_mutex.clone(), ukf_mutex.clone());
 
     let start = Instant::now();
-    let mut pre_u = 0.0;
     loop {
         let x_est = if DEBUG_UKF {
             let x = x_mutex.lock().unwrap();
@@ -71,7 +75,6 @@ fn main() {
             println!("elapsed: {:.2} sec", start.elapsed().as_secs_f64());
             break;
         }
-        let x_est = vector![x_est[0], x_est[1], x_est[3], x_est[4]];
 
         let pre_u_n = {
             let u_n = u_n_mutex.lock().unwrap();
@@ -86,10 +89,9 @@ fn main() {
             }
         };
 
-        if approx_equal(pre_u, u_n[0]) {
+        if approx_equal(pre_u_n[0], u_n[0]) {
             continue;
         }
-        pre_u = u_n[0];
 
         if DEBUG {
             u_n[0] = 0.0;
@@ -124,7 +126,7 @@ const G: f64 = 9.81;
 const KT: f64 = 0.15; // m2006 * 2
 /// 分母係数
 const D1: f64 = (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) * (M2 * L * L + J2);
-const D: f64 = D1 - M2 * M2 * L * L;
+// const D: f64 = D1 - M2 * M2 * L * L;
 // 非線形
 fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let mut r = *x;
@@ -143,18 +145,18 @@ fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     r[5] = term1 + term2 + term3;
     r
 }
-fn fx(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
-    let mut r = *x;
-    let d = D - M2 * M2 * L * L * x[2].cos() * x[2].cos();
-    let term1 = (M1 + M2 + J1 / (R_W * R_W)) * M2 * G * L * x[2].sin();
-    let term2 = (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin()) * M2 * L * x[2].cos();
-    r[3] += (term1 - term2) / d * DT;
-    r[2] += x[3] * DT;
-    let term3 = (J2 + M2 * L * L) * (KT * u / R_W + M2 * L * x[3].powi(2) * x[2].sin());
-    let term4 = M2 * G * L * L * x[2].sin() * x[2].cos();
-    r[1] += (term3 + term4) / d * DT;
-    r[0] += x[1] * DT;
-    r
+
+fn differential(x: &na::Vector6<f64>, u: f64) -> na::Vector6<f64> {
+    (dynamics_short(x, u, DT) - *x) / DT
+}
+
+// ルンゲクッタ
+fn rk4(x: &na::Vector6<f64>, u: f64) -> na::Vector6<f64> {
+    let k1 = DT * differential(x, u);
+    let k2 = DT * differential(&(x + k1 / 2.0), u);
+    let k3 = DT * differential(&(x + k2 / 2.0), u);
+    let k4 = DT * differential(&(x + k3), u);
+    x + (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
 }
 
 // MARK: - UKF
@@ -282,7 +284,7 @@ fn start_ukf_thread(
 }
 
 // MARK: - Print
-fn print_con(start: Instant, u_n: &na::SVector<f64, N>, x_est: &na::SVector<f64, 4>) {
+fn print_con(start: Instant, u_n: &na::SVector<f64, N>, x_est: &na::SVector<f64, 6>) {
     print!("\x1b[32mCon:");
     print!("{:6.2} ", start.elapsed().as_secs_f64());
     print!("u:{:6.2} ", u_n[0]);
@@ -290,8 +292,8 @@ fn print_con(start: Instant, u_n: &na::SVector<f64, N>, x_est: &na::SVector<f64,
         "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
         x_est[0],
         x_est[1],
-        x_est[2].to_degrees(),
-        x_est[3].to_degrees()
+        x_est[3].to_degrees(),
+        x_est[4].to_degrees()
     );
     println!("\x1b[m");
 }
