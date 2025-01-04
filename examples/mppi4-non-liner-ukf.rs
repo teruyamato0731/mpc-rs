@@ -11,24 +11,24 @@ use std::time::{Duration, Instant};
 // MARK: - Constants
 // 予測ホライゾン
 const T: f64 = 1.2;
-const N: usize = 12;
+const N: usize = 8;
 const DT: f64 = T / N as f64;
 
 // 制御ホライゾン
-const K: usize = 1e5 as usize;
-const LAMBDA: f64 = 2.0;
+const K: usize = 5e5 as usize;
+const LAMBDA: f64 = 1.4;
 const R_U: f64 = 4.0;
-const C: na::Vector6<f64> = vector![0.0, 0.0, 0.0, 1.0, 0.8, 0.0];
+const C: na::Vector6<f64> = vector![0.1, 0.2, 0.0, 1.0, 0.8, 0.0];
 
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
 
 // UKF
 const PHY: na::Vector3<f64> = vector![100.0, 70.0, 20.0];
-const R: na::SVector<f64, 5> = vector![500.0, 500.0, 10.0, 0.05, 0.05];
+const R: na::SVector<f64, 5> = vector![200.0, 200.0, 10.0, 0.05, 0.05];
 
 const DEBUG: bool = false;
-const DEBUG_UKF: bool = true;
+const DEBUG_UKF: bool = false;
 
 fn cost(x: &na::Vector6<f64>) -> f64 {
     C[0] * x[0].powi(2)
@@ -44,7 +44,7 @@ fn main() {
     let init_x = vector![0.0, 0.0, 0.0, 0.1, 0.0, 0.0];
     let init_u_n = na::SVector::<f64, N>::zeros();
 
-    let mut mppi = Mppi::<N, K, 6>::new(rk4, cost, LAMBDA, R_U, LIMIT);
+    let mut mppi = Mppi::<N, K, 6>::new(|x, u| rk4(x, u, DT), cost, LAMBDA, R_U, LIMIT);
 
     let x_mutex = Arc::new(Mutex::new(init_x));
     let ukf_mutex = init_ukf(&init_x);
@@ -126,23 +126,29 @@ const G: f64 = 9.81;
 const KT: f64 = 0.15; // m2006 * 2
 /// 分母係数
 const D1: f64 = (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) * (M2 * L * L + J2);
-// const D: f64 = D1 - M2 * M2 * L * L;
+// 2階微分方程式を記述
+fn ddot(x: &na::Vector4<f64>, u: f64) -> (f64, f64) {
+    let d = D1 - (M2 * L * x[2].cos()).powi(2);
+    let term1 = (M2 * L * L + J2) * M2 * L / d * x[3].powi(2) * x[2].sin();
+    let term2 = -(M2 * L).powi(2) * G / d * x[2].sin() * x[2].cos();
+    let term3 = 2.0 * (M2 * L * L + J2) / (d * R_W) * KT * u;
+    let ddot_x = term1 + term2 + term3;
+    let term1 = -(M2 * L).powi(2) / d * x[3].powi(2) * x[2].sin() * x[2].cos();
+    let term2 = M2 * G * L * (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) / d * x[2].sin();
+    let term3 = -2.0 * M2 * L / (d * R_W) * KT * u * x[2].cos();
+    let ddot_theta = term1 + term2 + term3;
+    (ddot_x, ddot_theta)
+}
 // 非線形
 fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let mut r = *x;
-    let d = D1 - (M2 * L * x[3].cos()).powi(2);
+    let (ddot_x, ddot_theta) = ddot(&vector![x[0], x[1], x[3], x[4]], u);
     r[0] += x[1] * dt;
     r[1] += x[2] * dt;
-    let term1 = (M2 * L * L + J2) * M2 * L / d * x[4].powi(2) * x[3].sin();
-    let term2 = -(M2 * L).powi(2) * G / d * x[3].sin() * x[3].cos();
-    let term3 = 2.0 * (M2 * L * L + J2) / (d * R_W) * KT * u;
-    r[2] = term1 + term2 + term3;
+    r[2] = ddot_x;
     r[3] += x[4] * dt;
     r[4] += x[5] * dt;
-    let term1 = -(M2 * L).powi(2) / d * x[4].powi(2) * x[3].sin() * x[3].cos();
-    let term2 = M2 * G * L * (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) / d * x[3].sin();
-    let term3 = -2.0 * M2 * L / (d * R_W) * KT * u * x[3].cos();
-    r[5] = term1 + term2 + term3;
+    r[5] = ddot_theta;
     r
 }
 
@@ -151,11 +157,11 @@ fn differential(x: &na::Vector6<f64>, u: f64) -> na::Vector6<f64> {
 }
 
 // ルンゲクッタ
-fn rk4(x: &na::Vector6<f64>, u: f64) -> na::Vector6<f64> {
-    let k1 = DT * differential(x, u);
-    let k2 = DT * differential(&(x + k1 / 2.0), u);
-    let k3 = DT * differential(&(x + k2 / 2.0), u);
-    let k4 = DT * differential(&(x + k3), u);
+fn rk4(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
+    let k1 = dt * differential(x, u);
+    let k2 = dt * differential(&(x + k1 / 2.0), u);
+    let k3 = dt * differential(&(x + k2 / 2.0), u);
+    let k4 = dt * differential(&(x + k3), u);
     x + (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
 }
 
@@ -236,7 +242,7 @@ fn start_dynamics_thread(
                     u_n[0]
                 };
                 let mut x = x_mutex.lock().unwrap();
-                *x = dynamics_short(&x, u, pre.elapsed().as_secs_f64());
+                *x = rk4(&x, u, pre.elapsed().as_secs_f64());
             }
             pre = Instant::now();
         }
@@ -270,7 +276,7 @@ fn start_ukf_thread(
                 let mut ukf = ukf_mutex.lock().expect("Failed to lock");
                 let dt = pre.elapsed().as_secs_f64();
                 pre = Instant::now();
-                let fx = |x: &_, u: f64| dynamics_short(x, u, dt);
+                let fx = |x: &_, u: f64| rk4(x, u, dt);
                 let q = gen_q(dt);
                 ukf.set_q(q);
                 ukf.predict(u, fx);
@@ -414,7 +420,7 @@ fn start_logging_thread(
 
                 let mut x_pred = x_est;
                 for i in 0..N {
-                    x_pred = dynamics_short(&x_pred, u_n[i], DT);
+                    x_pred = rk4(&x_pred, u_n[i], DT);
                 }
 
                 write(
