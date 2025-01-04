@@ -39,7 +39,7 @@ fn main() {
     let u_n_mutex2 = u_n_mutex.clone();
     let u_n_mutex3 = u_n_mutex.clone();
 
-    let mut mppi = Mppi::<N, K>::new(dynamics, cost, LAMBDA, R, LIMIT);
+    let mut mppi = Mppi::<N, K, 4>::new(dynamics, cost, LAMBDA, R, LIMIT);
     let ukf_mutex = init_ukf(&init);
     let ukf_mutex2 = ukf_mutex.clone();
 

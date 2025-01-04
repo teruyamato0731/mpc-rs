@@ -40,7 +40,7 @@ fn main() {
 
     let init_u_n = na::SVector::<f64, N>::zeros();
     let u_n_mutex = Arc::new(Mutex::new(init_u_n));
-    let mut mppi = Mppi::<N, K>::new(dynamics, cost, LAMBDA, R_U, LIMIT);
+    let mut mppi = Mppi::<N, K, 4>::new(dynamics, cost, LAMBDA, R_U, LIMIT);
     let init_x = vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let ukf_mutex = init_ukf(init_x);
 

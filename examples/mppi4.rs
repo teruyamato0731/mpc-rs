@@ -30,7 +30,7 @@ fn main() {
     let mut x = na::Vector4::new(0.5, 0.0, 0.1, 0.0);
     let mut u_n = na::SVector::<f64, N>::zeros();
 
-    let mut mppi = Mppi::<N, K>::new(dynamics, cost, LAMBDA, R, LIMIT);
+    let mut mppi = Mppi::<N, K, 4>::new(dynamics, cost, LAMBDA, R, LIMIT);
 
     // ログファイルの作成
     let file_path = "logs/mppi/mppi.csv";

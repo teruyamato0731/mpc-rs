@@ -37,7 +37,7 @@ fn main() {
 
     let mut u_n = na::SVector::<f64, N>::zeros();
 
-    let mut mppi = Mppi::<N, K>::new(dynamics, cost, LAMBDA, R, LIMIT);
+    let mut mppi = Mppi::<N, K, 4>::new(dynamics, cost, LAMBDA, R, LIMIT);
 
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
