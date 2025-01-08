@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 // MARK: - Constants
 // 予測ホライゾン
 const T: f64 = 1.2;
-const N: usize = 40;
+const N: usize = 8;
 const DT: f64 = T / N as f64;
 const DUR: f64 = 0.03;
 
@@ -27,11 +27,10 @@ const C: na::Matrix4<f64> = matrix![
 
 // UKF
 const PHY: na::Vector3<f64> = vector![100.0, 70.0, 20.0];
-const R: na::SVector<f64, 5> = vector![500.0, 500.0, 10.0, 0.05, 0.05];
-// const GATE: f64 = 4.5;
+const R: na::SVector<f64, 5> = vector![200.0, 200.0, 10.0, 0.05, 0.05];
 
 const DEBUG: bool = false;
-const DEBUG_UKF: bool = false;
+const DEBUG_UKF: bool = true;
 
 // MARK: - Main
 fn main() {
@@ -41,7 +40,7 @@ fn main() {
 
     let init_u_n = na::SVector::<f64, N>::zeros();
     let u_n_mutex = Arc::new(Mutex::new(init_u_n));
-    let init_x = vector![0.5, 0.0, 0.0, 0.1, 0.0, 0.0];
+    let init_x = vector![0.0, 0.0, 0.0, 0.1, 0.0, 0.0];
     let x_mutex = Arc::new(Mutex::new(init_x));
     let ukf_mutex = init_ukf(&init_x);
 
@@ -63,7 +62,7 @@ fn main() {
 
         // θの絶対値がpi/2を超えればエラー
         if x_est[3].abs() > std::f64::consts::PI / 2.0 {
-            println!("x[2] is over pi/2");
+            println!("θ is over pi/2");
             println!(
                 "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}] ",
                 x_est[0], x_est[1], x_est[2], x_est[3], x_est[4], x_est[5]
@@ -175,16 +174,8 @@ fn grad_cost(x: &na::Vector4<f64>, u: &na::SVectorView<f64, N>) -> na::SVector<f
     2.0 * g.transpose() * q * (g * u + f * x - x_ref)
 }
 
-fn gen_ref(x: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
-    let mut r = na::SMatrix::<f64, 4, N>::zeros();
-    for i in 0..N {
-        let phase = std::f64::consts::PI * i as f64 / N as f64;
-        r[(0, i)] = (x[0] * (1.0 + phase.cos())) / 2.0;
-        r[(1, i)] = (-0.75 * x[0]).clamp(-2.0, 2.0) * phase.sin();
-        r[(2, i)] = (-0.5 * x[0]).clamp(-0.35, 0.35) * (1.0 * phase.cos()) / 2.0;
-        r[(3, i)] = (-0.5 * x[0]).clamp(-1.5, 1.5) * phase.sin();
-    }
-    r
+fn gen_ref(_: &na::Vector4<f64>) -> na::SMatrix<f64, 4, N> {
+    na::SMatrix::<f64, 4, N>::zeros()
 }
 
 // MARK: - UKF
@@ -202,8 +193,8 @@ fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
         36.0 * 60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         36.0 * -60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         state[4].to_degrees(),                     // 角速度 [rad/s] -> [deg/s]
-        az / G,                                    // 垂直方向の力 [m/s^2] -> [G]
-        ax / G,                                    // 水平方向の力 [m/s^2] -> [G]
+        az / G,                                    // 垂直方向の加速度 [m/s^2] -> [G]
+        ax / G,                                    // 水平方向の加速度 [m/s^2] -> [G]
     ]
 }
 fn sensor(x: &na::Vector6<f64>) -> na::Vector5<f64> {

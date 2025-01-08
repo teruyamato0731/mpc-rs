@@ -18,7 +18,7 @@ const DT: f64 = T / N as f64;
 const K: usize = 5e5 as usize;
 const LAMBDA: f64 = 1.4;
 const R_U: f64 = 4.0;
-const C: na::Vector6<f64> = vector![0.1, 0.2, 0.0, 1.0, 0.8, 0.0];
+const C: na::Vector4<f64> = vector![0.1, 0.1, 1.0, 0.5];
 
 // 制約
 const LIMIT: (f64, f64) = (-10.0, 10.0);
@@ -28,15 +28,10 @@ const PHY: na::Vector3<f64> = vector![100.0, 70.0, 20.0];
 const R: na::SVector<f64, 5> = vector![200.0, 200.0, 10.0, 0.05, 0.05];
 
 const DEBUG: bool = false;
-const DEBUG_UKF: bool = false;
+const DEBUG_UKF: bool = true;
 
-fn cost(x: &na::Vector6<f64>) -> f64 {
-    C[0] * x[0].powi(2)
-        + C[1] * x[1].powi(2)
-        + C[2] * x[2].powi(2)
-        + C[3] * x[3].powi(2)
-        + C[4] * x[4].powi(2)
-        + C[5] * x[5].powi(2)
+fn cost(x: &na::Vector4<f64>) -> f64 {
+    C[0] * x[0].powi(2) + C[1] * x[1].powi(2) + C[2] * x[2].powi(2) + C[3] * x[3].powi(2)
 }
 
 // MARK: - Main
@@ -44,7 +39,7 @@ fn main() {
     let init_x = vector![0.0, 0.0, 0.0, 0.1, 0.0, 0.0];
     let init_u_n = na::SVector::<f64, N>::zeros();
 
-    let mut mppi = Mppi::<N, K, 6>::new(|x, u| rk4(x, u, DT), cost, LAMBDA, R_U, LIMIT);
+    let mut mppi = Mppi::<N, K, 4>::new(|x, u| dynamics4(x, u, DT), cost, LAMBDA, R_U, LIMIT);
 
     let x_mutex = Arc::new(Mutex::new(init_x));
     let ukf_mutex = init_ukf(&init_x);
@@ -67,7 +62,7 @@ fn main() {
 
         // θの絶対値がpi/2を超えればエラー
         if x_est[3].abs() > std::f64::consts::PI / 2.0 {
-            println!("x[2] is over pi/2");
+            println!("θ is over pi/2");
             println!(
                 "x: [{:6.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}, {:5.2}] ",
                 x_est[0], x_est[1], x_est[2], x_est[3], x_est[4], x_est[5]
@@ -81,6 +76,7 @@ fn main() {
             *u_n
         };
 
+        let x_est = vector![x_est[0], x_est[1], x_est[3], x_est[4]];
         let mut u_n = match mppi.compute(&x_est, &pre_u_n) {
             Ok(u) => u,
             Err(e) => {
@@ -139,30 +135,25 @@ fn ddot(x: &na::Vector4<f64>, u: f64) -> (f64, f64) {
     let ddot_theta = term1 + term2 + term3;
     (ddot_x, ddot_theta)
 }
-// 非線形
-fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
+fn dynamics4(x: &na::Vector4<f64>, u: f64, dt: f64) -> na::Vector4<f64> {
+    let (ddot_x, ddot_theta) = ddot(x, u);
     let mut r = *x;
-    let (ddot_x, ddot_theta) = ddot(&vector![x[0], x[1], x[3], x[4]], u);
-    r[0] += x[1] * dt;
-    r[1] += x[2] * dt;
-    r[2] = ddot_x;
-    r[3] += x[4] * dt;
-    r[4] += x[5] * dt;
-    r[5] = ddot_theta;
+    r[3] += ddot_theta * dt;
+    r[2] += r[3] * dt;
+    r[1] += ddot_x * dt;
+    r[0] += r[1] * dt;
     r
 }
-
-fn differential(x: &na::Vector6<f64>, u: f64) -> na::Vector6<f64> {
-    (dynamics_short(x, u, DT) - *x) / DT
-}
-
-// ルンゲクッタ
-fn rk4(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
-    let k1 = dt * differential(x, u);
-    let k2 = dt * differential(&(x + k1 / 2.0), u);
-    let k3 = dt * differential(&(x + k2 / 2.0), u);
-    let k4 = dt * differential(&(x + k3), u);
-    x + (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
+fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
+    let (ddot_x, ddot_theta) = ddot(&vector![x[0], x[1], x[3], x[4]], u);
+    let mut r = *x;
+    r[5] = ddot_theta;
+    r[4] += r[5] * dt;
+    r[3] += r[4] * dt;
+    r[2] = ddot_x;
+    r[1] += r[2] * dt;
+    r[0] += r[1] * dt;
+    r
 }
 
 // MARK: - UKF
@@ -180,8 +171,8 @@ fn hx(state: &na::Vector6<f64>) -> na::Vector5<f64> {
         36.0 * 60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         36.0 * -60.0 / (2.0 * PI * R_W) * state[1], // 駆動輪のオドメトリ [m/s] -> [rpm]
         state[4].to_degrees(),                     // 角速度 [rad/s] -> [deg/s]
-        az / G,                                    // 垂直方向の力 [m/s^2] -> [G]
-        ax / G,                                    // 水平方向の力 [m/s^2] -> [G]
+        az / G,                                    // 垂直方向の加速度 [m/s^2] -> [G]
+        ax / G,                                    // 水平方向の加速度 [m/s^2] -> [G]
     ]
 }
 fn sensor(x: &na::Vector6<f64>) -> na::Vector5<f64> {
@@ -242,7 +233,7 @@ fn start_dynamics_thread(
                     u_n[0]
                 };
                 let mut x = x_mutex.lock().unwrap();
-                *x = rk4(&x, u, pre.elapsed().as_secs_f64());
+                *x = dynamics_short(&x, u, pre.elapsed().as_secs_f64());
             }
             pre = Instant::now();
         }
@@ -276,12 +267,11 @@ fn start_ukf_thread(
                 let mut ukf = ukf_mutex.lock().expect("Failed to lock");
                 let dt = pre.elapsed().as_secs_f64();
                 pre = Instant::now();
-                let fx = |x: &_, u: f64| rk4(x, u, dt);
+                let fx = |x: &_, u: f64| dynamics_short(x, u, dt);
                 let q = gen_q(dt);
                 ukf.set_q(q);
                 ukf.predict(u, fx);
                 ukf.update(&x_obs, hx);
-                // let result = ukf.update_with_gate(&x_obs, hx, gating_acc);
                 (ukf.state(), ukf.covariance())
             };
             print_rcv(&x_est, &x_obs, start, u, &x, &p);
@@ -290,7 +280,7 @@ fn start_ukf_thread(
 }
 
 // MARK: - Print
-fn print_con(start: Instant, u_n: &na::SVector<f64, N>, x_est: &na::SVector<f64, 6>) {
+fn print_con(start: Instant, u_n: &na::SVector<f64, N>, x_est: &na::SVector<f64, 4>) {
     print!("\x1b[32mCon:");
     print!("{:6.2} ", start.elapsed().as_secs_f64());
     print!("u:{:6.2} ", u_n[0]);
@@ -298,8 +288,8 @@ fn print_con(start: Instant, u_n: &na::SVector<f64, N>, x_est: &na::SVector<f64,
         "e:[{:6.2},{:6.2},{:5.0},{:5.0}] ",
         x_est[0],
         x_est[1],
-        x_est[3].to_degrees(),
-        x_est[4].to_degrees()
+        x_est[2].to_degrees(),
+        x_est[3].to_degrees()
     );
     println!("\x1b[m");
 }
@@ -420,7 +410,7 @@ fn start_logging_thread(
 
                 let mut x_pred = x_est;
                 for i in 0..N {
-                    x_pred = rk4(&x_pred, u_n[i], DT);
+                    x_pred = dynamics_short(&x_pred, u_n[i], DT);
                 }
 
                 write(
