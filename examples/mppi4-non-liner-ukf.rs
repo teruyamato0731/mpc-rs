@@ -36,10 +36,10 @@ fn cost(x: &na::Vector4<f64>) -> f64 {
 
 // MARK: - Main
 fn main() {
-    let init_x = vector![0.0, 0.0, 0.0, 0.1, 0.0, 0.0];
+    let init_x = vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let init_u_n = na::SVector::<f64, N>::zeros();
 
-    let mut mppi = Mppi::<N, K, 4>::new(|x, u| dynamics4(x, u, DT), cost, LAMBDA, R_U, LIMIT);
+    let mut mppi = Mppi::<N, K, 4>::new(dynamics4, cost, LAMBDA, R_U, LIMIT);
 
     let x_mutex = Arc::new(Mutex::new(init_x));
     let ukf_mutex = init_ukf(&init_x);
@@ -123,29 +123,31 @@ const KT: f64 = 0.15; // m2006 * 2
 /// 分母係数
 const D1: f64 = (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) * (M2 * L * L + J2);
 // 2階微分方程式を記述
-fn ddot(x: &na::Vector4<f64>, u: f64) -> (f64, f64) {
+fn ddot(x: &na::Vector4<f64>, u: f64, f: f64) -> (f64, f64) {
     let d = D1 - (M2 * L * x[2].cos()).powi(2);
     let term1 = (M2 * L * L + J2) * M2 * L / d * x[3].powi(2) * x[2].sin();
     let term2 = -(M2 * L).powi(2) * G / d * x[2].sin() * x[2].cos();
     let term3 = 2.0 * (M2 * L * L + J2) / (d * R_W) * KT * u;
-    let ddot_x = term1 + term2 + term3;
+    let term4 = (M2 * L * L + J2) / d * f * x[3].cos();
+    let ddot_x = term1 + term2 + term3 + term4;
     let term1 = -(M2 * L).powi(2) / d * x[3].powi(2) * x[2].sin() * x[2].cos();
-    let term2 = M2 * G * L * (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) / d * x[2].sin();
+    let term2 = (M2 * G * x[2].sin() - 2.0 * f) * L * (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) / d;
     let term3 = -2.0 * M2 * L / (d * R_W) * KT * u * x[2].cos();
-    let ddot_theta = term1 + term2 + term3;
+    let term4 = -M2 * L * f * x[3].cos().powi(2) / d;
+    let ddot_theta = term1 + term2 + term3 + term4;
     (ddot_x, ddot_theta)
 }
-fn dynamics4(x: &na::Vector4<f64>, u: f64, dt: f64) -> na::Vector4<f64> {
-    let (ddot_x, ddot_theta) = ddot(x, u);
+fn dynamics4(x: &na::Vector4<f64>, u: f64) -> na::Vector4<f64> {
+    let (ddot_x, ddot_theta) = ddot(x, u, 0.0);
     let mut r = *x;
-    r[3] += ddot_theta * dt;
-    r[2] += r[3] * dt;
-    r[1] += ddot_x * dt;
-    r[0] += r[1] * dt;
+    r[3] += ddot_theta * DT;
+    r[2] += r[3] * DT;
+    r[1] += ddot_x * DT;
+    r[0] += r[1] * DT;
     r
 }
-fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
-    let (ddot_x, ddot_theta) = ddot(&vector![x[0], x[1], x[3], x[4]], u);
+fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64, f: f64) -> na::Vector6<f64> {
+    let (ddot_x, ddot_theta) = ddot(&vector![x[0], x[1], x[3], x[4]], u, f);
     let mut r = *x;
     r[5] = ddot_theta;
     r[4] += r[5] * dt;
@@ -232,8 +234,14 @@ fn start_dynamics_thread(
                     let u_n = u_n_mutex.lock().unwrap();
                     u_n[0]
                 };
-                let mut x = x_mutex.lock().unwrap();
-                *x = dynamics_short(&x, u, pre.elapsed().as_secs_f64());
+                let mut x = x_mutex.lock().unwrap(); // 1s~2s まで 2N の外乱を与える
+                let f =
+                    if 1.0 < start.elapsed().as_secs_f64() && start.elapsed().as_secs_f64() < 1.5 {
+                        2.0
+                    } else {
+                        0.0
+                    };
+                *x = dynamics_short(&x, u, pre.elapsed().as_secs_f64(), f);
             }
             pre = Instant::now();
         }
@@ -267,7 +275,7 @@ fn start_ukf_thread(
                 let mut ukf = ukf_mutex.lock().expect("Failed to lock");
                 let dt = pre.elapsed().as_secs_f64();
                 pre = Instant::now();
-                let fx = |x: &_, u: f64| dynamics_short(x, u, dt);
+                let fx = |x: &_, u: f64| dynamics_short(x, u, dt, 0.0);
                 let q = gen_q(dt);
                 ukf.set_q(q);
                 ukf.predict(u, fx);
@@ -410,7 +418,7 @@ fn start_logging_thread(
 
                 let mut x_pred = x_est;
                 for i in 0..N {
-                    x_pred = dynamics_short(&x_pred, u_n[i], DT);
+                    x_pred = dynamics_short(&x_pred, u_n[i], DT, 0.0);
                 }
 
                 write(

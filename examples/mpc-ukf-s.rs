@@ -40,7 +40,7 @@ fn main() {
 
     let init_u_n = na::SVector::<f64, N>::zeros();
     let u_n_mutex = Arc::new(Mutex::new(init_u_n));
-    let init_x = vector![0.0, 0.0, 0.0, 0.1, 0.0, 0.0];
+    let init_x = vector![0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let x_mutex = Arc::new(Mutex::new(init_x));
     let ukf_mutex = init_ukf(&init_x);
 
@@ -133,7 +133,7 @@ const KT: f64 = 0.15; // m2006 * 2
 const D1: f64 = (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) * (M2 * L * L + J2);
 const D: f64 = D1 - M2 * M2 * L * L;
 // 非線形
-fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
+fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64, f: f64) -> na::Vector6<f64> {
     let mut r = *x;
     let d = D1 - (M2 * L * x[3].cos()).powi(2);
     r[0] += x[1] * dt;
@@ -141,13 +141,15 @@ fn dynamics_short(x: &na::Vector6<f64>, u: f64, dt: f64) -> na::Vector6<f64> {
     let term1 = (M2 * L * L + J2) * M2 * L / d * x[4].powi(2) * x[3].sin();
     let term2 = -(M2 * L).powi(2) * G / d * x[3].sin() * x[3].cos();
     let term3 = 2.0 * (M2 * L * L + J2) / (d * R_W) * KT * u;
-    r[2] = term1 + term2 + term3;
+    let term4 = (M2 * L * L + J2) / d * f * x[3].cos();
+    r[2] = term1 + term2 + term3 + term4;
     r[3] += x[4] * dt;
     r[4] += x[5] * dt;
     let term1 = -(M2 * L).powi(2) / d * x[4].powi(2) * x[3].sin() * x[3].cos();
-    let term2 = M2 * G * L * (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) / d * x[3].sin();
+    let term2 = (M2 * G * x[3].sin() - 2.0 * f) * L * (2.0 * M1 + M2 + 2.0 * J1 / (R_W * R_W)) / d;
     let term3 = -2.0 * M2 * L / (d * R_W) * KT * u * x[3].cos();
-    r[5] = term1 + term2 + term3;
+    let term4 = -M2 * L * f * x[3].cos().powi(2) / d;
+    r[5] = term1 + term2 + term3 + term4;
     r
 }
 
@@ -284,7 +286,14 @@ fn start_dynamics_thread(
                     u_n[0]
                 };
                 let mut x = x_mutex.lock().unwrap();
-                *x = dynamics_short(&x, u, pre.elapsed().as_secs_f64());
+                // 1s~2s まで 2N の外乱を与える
+                let f =
+                    if 1.0 < start.elapsed().as_secs_f64() && start.elapsed().as_secs_f64() < 1.5 {
+                        2.0
+                    } else {
+                        0.0
+                    };
+                *x = dynamics_short(&x, u, pre.elapsed().as_secs_f64(), f);
             }
             pre = Instant::now();
         }
@@ -318,7 +327,7 @@ fn start_ukf_thread(
                 let mut ukf = ukf_mutex.lock().expect("Failed to lock");
                 let dt = pre.elapsed().as_secs_f64();
                 pre = Instant::now();
-                let fx = |x: &_, u: f64| dynamics_short(x, u, dt);
+                let fx = |x: &_, u: f64| dynamics_short(x, u, dt, 0.0);
                 let q = gen_q(dt);
                 ukf.set_q(q);
                 ukf.predict(u, fx);
@@ -461,7 +470,7 @@ fn start_logging_thread(
 
                 let mut x_pred = x_est;
                 for i in 0..N {
-                    x_pred = dynamics_short(&x_pred, u_n[i], DT);
+                    x_pred = dynamics_short(&x_pred, u_n[i], DT, 0.0);
                 }
 
                 write(
